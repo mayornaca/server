@@ -45,12 +45,15 @@ func MessageToMobileDTO(m messages.MessageOut) smsgateway.MobileMessage {
 
 func MessageStateToDTO(state messages.MessageStateOut) smsgateway.MessageState {
 	return smsgateway.MessageState{
-		ID:          state.ID,
-		DeviceID:    state.DeviceID,
-		State:       smsgateway.ProcessingState(state.State),
-		IsHashed:    state.IsHashed,
-		IsEncrypted: state.IsEncrypted,
-		Recipients:  state.Recipients,
-		States:      state.States,
+		ID:            state.ID,
+		DeviceID:      state.DeviceID,
+		State:         smsgateway.ProcessingState(state.State),
+		IsHashed:      state.IsHashed,
+		IsEncrypted:   state.IsEncrypted,
+		Recipients:    state.Recipients,
+		States:        state.States,
+		TextMessage:   nil,
+		DataMessage:   nil,
+		HashedMessage: nil,
 	}
 }

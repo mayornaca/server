@@ -161,13 +161,16 @@ func (h *ThirdPartyController) post(userID string, c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusAccepted).
 		JSON(smsgateway.GetMessageResponse{
-			ID:          state.ID,
-			DeviceID:    state.DeviceID,
-			State:       smsgateway.ProcessingState(state.State),
-			IsHashed:    state.IsHashed,
-			IsEncrypted: state.IsEncrypted,
-			Recipients:  state.Recipients,
-			States:      state.States,
+			ID:            state.ID,
+			DeviceID:      state.DeviceID,
+			State:         smsgateway.ProcessingState(state.State),
+			IsHashed:      state.IsHashed,
+			IsEncrypted:   state.IsEncrypted,
+			Recipients:    state.Recipients,
+			States:        state.States,
+			TextMessage:   nil,
+			DataMessage:   nil,
+			HashedMessage: nil,
 		})
 }
 
@@ -184,6 +187,7 @@ func (h *ThirdPartyController) post(userID string, c *fiber.Ctx) error {
 //	@Param			limit		query		int								false	"Pagination limit"						default(50)	min(1)	max(100)
 //	@Param			offset		query		int								false	"Pagination offset"						default(0)
 //	@Success		200			{object}	smsgateway.GetMessagesResponse	"A list of messages"
+//	@Header			200			{integer}	X-Total-Count					"Total number of items available"	Format(int64)
 //	@Failure		400			{object}	smsgateway.ErrorResponse		"Invalid request"
 //	@Failure		401			{object}	smsgateway.ErrorResponse		"Unauthorized"
 //	@Failure		403			{object}	smsgateway.ErrorResponse		"Forbidden"
