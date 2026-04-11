@@ -127,6 +127,7 @@ func (h *ThirdPartyController) post(userID string, c *fiber.Ctx) error {
 		WithDeliveryReport: req.WithDeliveryReport,
 		TTL:                req.TTL,
 		ValidUntil:         req.ValidUntil,
+		ScheduledAt:        req.ScheduleAt,
 		Priority:           req.Priority,
 	}
 	state, err := h.messagesSvc.Enqueue(
@@ -161,13 +162,16 @@ func (h *ThirdPartyController) post(userID string, c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusAccepted).
 		JSON(smsgateway.GetMessageResponse{
-			ID:          state.ID,
-			DeviceID:    state.DeviceID,
-			State:       smsgateway.ProcessingState(state.State),
-			IsHashed:    state.IsHashed,
-			IsEncrypted: state.IsEncrypted,
-			Recipients:  state.Recipients,
-			States:      state.States,
+			ID:            state.ID,
+			DeviceID:      state.DeviceID,
+			State:         smsgateway.ProcessingState(state.State),
+			IsHashed:      state.IsHashed,
+			IsEncrypted:   state.IsEncrypted,
+			Recipients:    state.Recipients,
+			States:        state.States,
+			TextMessage:   nil,
+			DataMessage:   nil,
+			HashedMessage: nil,
 		})
 }
 
