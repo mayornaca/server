@@ -38,7 +38,7 @@ func messageToDomain(input Message) (MessageOut, error) {
 			WithDeliveryReport: &input.WithDeliveryReport,
 			TTL:                ttl,
 			ValidUntil:         input.ValidUntil,
-			ScheduleAt:        input.ScheduleAt,
+			ScheduleAt:         input.ScheduleAt,
 			Priority:           smsgateway.MessagePriority(input.Priority),
 		},
 		CreatedAt: input.CreatedAt,
