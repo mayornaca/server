@@ -19,7 +19,7 @@ type MessageIn struct {
 	WithDeliveryReport *bool
 	TTL                *uint64
 	ValidUntil         *time.Time
-	ScheduledAt        *time.Time
+	ScheduleAt        *time.Time
 	Priority           smsgateway.MessagePriority
 }
 
