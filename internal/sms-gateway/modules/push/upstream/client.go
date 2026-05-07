@@ -16,8 +16,12 @@ import (
 	"github.com/samber/lo"
 )
 
+// gesvial.14: defaultBaseURL is intentionally empty. The upstream client
+// requires an explicit gesvial-operated URL via the "upstream_base_url" option
+// (env GATEWAY__UPSTREAM_URL). If empty, Open() fails; see policy in
+// security/egress-allowlist.yaml.
 const (
-	defaultBaseURL = "https://api.sms-gate.app/upstream/v1"
+	defaultBaseURL = ""
 	optionBaseURL  = "upstream_base_url"
 )
 
@@ -44,6 +48,10 @@ func (c *Client) Open(_ context.Context) error {
 
 	if c.client != nil {
 		return nil
+	}
+
+	if c.baseURL() == "" {
+		return fmt.Errorf("upstream push client requires %s option (GATEWAY__UPSTREAM_URL) to be set to a gesvial-operated URL", optionBaseURL)
 	}
 
 	c.client = &http.Client{}

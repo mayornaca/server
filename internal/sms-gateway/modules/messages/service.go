@@ -12,6 +12,7 @@ import (
 	"github.com/android-sms-gateway/server/internal/sms-gateway/models"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/db"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/events"
+	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/webhooks"
 	"github.com/capcom6/go-helpers/anys"
 	"github.com/capcom6/go-helpers/slices"
 	"github.com/nyaruka/phonenumbers"
@@ -31,7 +32,8 @@ type Service struct {
 	messages      *Repository
 	hashingWorker *hashingWorker
 
-	eventsSvc *events.Service
+	eventsSvc      *events.Service
+	webhookSvc     *webhooks.Dispatcher
 
 	logger *zap.Logger
 	idgen  func() string
@@ -43,6 +45,7 @@ func NewService(
 	cache *cache,
 	messages *Repository,
 	eventsSvc *events.Service,
+	webhookSvc *webhooks.Dispatcher,
 	hashingTask *hashingWorker,
 	logger *zap.Logger,
 	idgen db.IDGen,
@@ -55,7 +58,8 @@ func NewService(
 		messages:      messages,
 		hashingWorker: hashingTask,
 
-		eventsSvc: eventsSvc,
+		eventsSvc:  eventsSvc,
+		webhookSvc: webhookSvc,
 
 		logger: logger,
 		idgen:  idgen,
@@ -123,7 +127,51 @@ func (s *Service) UpdateState(device *models.Device, message MessageStateIn) err
 	s.hashingWorker.Enqueue(existing.ID)
 	s.metrics.IncTotal(string(existing.State))
 
+	// gesvial.14 homologation: dispatch server-side webhook for recipient state
+	// updates. No-op when WEBHOOKS__SERVER_SIDE_ENABLED=false (default). Fires
+	// one event per recipient in a terminal state; idempotency is the receiver's
+	// responsibility during validation.
+	s.publishRecipientWebhooks(device.UserID, device.ID, existing)
+
 	return nil
+}
+
+func (s *Service) publishRecipientWebhooks(userID, deviceID string, msg Message) {
+	deviceIDPtr := deviceID
+	updatedAt := time.Now()
+	simNumber := toSimNumber(msg.SimNumber)
+	for _, r := range msg.Recipients {
+		var (
+			event   smsgateway.WebhookEvent
+			payload map[string]any
+		)
+		switch r.State {
+		case ProcessingStateSent:
+			event = smsgateway.WebhookEventSmsSent
+			payload = webhooks.SmsSentPayload(msg.ExtID, r.PhoneNumber, simNumber, 1, updatedAt)
+		case ProcessingStateDelivered:
+			event = smsgateway.WebhookEventSmsDelivered
+			payload = webhooks.SmsDeliveredPayload(msg.ExtID, r.PhoneNumber, simNumber, updatedAt)
+		case ProcessingStateFailed:
+			reason := ""
+			if r.Error != nil {
+				reason = *r.Error
+			}
+			event = smsgateway.WebhookEventSmsFailed
+			payload = webhooks.SmsFailedPayload(msg.ExtID, r.PhoneNumber, simNumber, updatedAt, reason)
+		default:
+			continue
+		}
+		s.webhookSvc.Publish(context.Background(), userID, &deviceIDPtr, event, payload)
+	}
+}
+
+func toSimNumber(sim *uint8) *int {
+	if sim == nil {
+		return nil
+	}
+	v := int(*sim)
+	return &v
 }
 
 func (s *Service) SelectStates(

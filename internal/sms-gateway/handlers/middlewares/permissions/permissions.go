@@ -9,7 +9,8 @@ import (
 type contextKey string
 
 const (
-	ScopeAll = "all:any"
+	ScopeAll   = "all:any"
+	ScopeAdmin = "admin:all"
 
 	localsScopes = contextKey("scopes")
 )
@@ -32,6 +33,25 @@ func HasScope(c *fiber.Ctx, scope string, opts *options) bool {
 		scopes,
 		func(item string) bool { return item == scope || (!opts.exact && item == ScopeAll) },
 	)
+}
+
+// IsAdmin returns true if the user has the admin:all scope.
+func IsAdmin(c *fiber.Ctx) bool {
+	return HasScope(c, ScopeAdmin, nil)
+}
+
+// AdminUserID is a sentinel value that means "admin access, no user filter".
+// It is never a valid real userID because real IDs are 6-char uppercase alphanumeric.
+const AdminUserID = "__ADMIN__"
+
+// EffectiveUserID returns the userID for data filtering.
+// If the user has admin:all scope, returns AdminUserID sentinel.
+// Otherwise returns the actual userID.
+func EffectiveUserID(c *fiber.Ctx, userID string) string {
+	if IsAdmin(c) {
+		return AdminUserID
+	}
+	return userID
 }
 
 func RequireScope(scope string, opts ...Option) fiber.Handler {

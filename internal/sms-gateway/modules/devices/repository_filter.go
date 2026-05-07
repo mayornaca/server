@@ -58,7 +58,7 @@ func (f *selectFilter) apply(query *gorm.DB) *gorm.DB {
 	if f.token != nil {
 		query = query.Where("auth_token = ?", *f.token)
 	}
-	if f.userID != nil {
+	if f.userID != nil && *f.userID != "__ADMIN__" {
 		query = query.Where("user_id = ?", *f.userID)
 	}
 	if f.activeWithin != 0 {

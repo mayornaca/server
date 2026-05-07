@@ -105,9 +105,26 @@ func (s *Service) Run(ctx context.Context) error {
 				s.logger.Error("failed to deserialize event wrapper", zap.Error(jsonErr))
 				continue
 			}
-			s.processEvent(wrapper)
+			s.safeProcessEvent(wrapper)
 		}
 	}
+}
+
+// safeProcessEvent wraps processEvent with panic recovery so a single bad
+// event (nil deref in a nested handler, runtime error in metrics) doesn't
+// take down the whole event loop. Docker would restart the process on
+// crash, but that drops every in-flight push notification — losing them is
+// strictly worse than logging and continuing. cloud-gesvial.19.1 M-MED-1.
+func (s *Service) safeProcessEvent(wrapper *eventWrapper) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			s.logger.Error("event processing panicked",
+				zap.Any("recover", rec),
+				zap.String("event_type", string(wrapper.Event.EventType)),
+			)
+		}
+	}()
+	s.processEvent(wrapper)
 }
 
 func (s *Service) processEvent(wrapper *eventWrapper) {

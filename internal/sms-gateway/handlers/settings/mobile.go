@@ -5,6 +5,7 @@ import (
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/middlewares/deviceauth"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/models"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/devices"
+	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/schedules"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/settings"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
@@ -14,13 +15,15 @@ import (
 type MobileController struct {
 	base.Handler
 
-	devicesSvc  *devices.Service
-	settingsSvc *settings.Service
+	devicesSvc   *devices.Service
+	settingsSvc  *settings.Service
+	schedulesSvc *schedules.Service
 }
 
 func NewMobileController(
 	devicesSvc *devices.Service,
 	settingsSvc *settings.Service,
+	schedulesSvc *schedules.Service,
 	logger *zap.Logger,
 	validator *validator.Validate,
 ) *MobileController {
@@ -29,8 +32,9 @@ func NewMobileController(
 			Logger:    logger,
 			Validator: validator,
 		},
-		devicesSvc:  devicesSvc,
-		settingsSvc: settingsSvc,
+		devicesSvc:   devicesSvc,
+		settingsSvc:  settingsSvc,
+		schedulesSvc: schedulesSvc,
 	}
 }
 
@@ -46,7 +50,7 @@ func NewMobileController(
 //
 // Get settings.
 func (h *MobileController) get(device models.Device, c *fiber.Ctx) error {
-	settings, err := h.settingsSvc.GetSettings(device.UserID, false)
+	settingsMap, err := h.settingsSvc.GetSettings(device.UserID, false)
 	if err != nil {
 		h.Logger.Error(
 			"failed to get settings",
@@ -57,7 +61,26 @@ func (h *MobileController) get(device models.Device, c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to get settings")
 	}
 
-	return c.JSON(settings)
+	// Enrich with gesvial-specific "testing" section the mobile app mirrors.
+	// Shape agreed with android app in gesvial.13:
+	//   testing: { schedules: [...], autonomousEnabled: bool, thresholdMinutes: int }
+	// The app registers a TestingSettings importer keyed on "testing"; the
+	// server stays the source of truth for schedules, while autonomousEnabled
+	// and thresholdMinutes govern the app's offline-cron fallback.
+	scheds, err := h.schedulesSvc.Select(device.UserID)
+	if err != nil {
+		h.Logger.Warn("failed to load schedules for mobile settings",
+			zap.Error(err),
+			zap.String("user_id", device.UserID))
+		scheds = nil
+	}
+	settingsMap["testing"] = map[string]any{
+		"schedules":         scheds,
+		"autonomousEnabled": true,
+		"thresholdMinutes":  5,
+	}
+
+	return c.JSON(settingsMap)
 }
 
 func (h *MobileController) Register(router fiber.Router) {

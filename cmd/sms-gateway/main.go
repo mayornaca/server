@@ -36,19 +36,17 @@ const (
 //	@name						Authorization
 //	@description				Private server authentication
 
-//	@title			SMSGate API
+//	@title			Gesvial SOS Gateway API
 //	@version		{APP_VERSION}
-//	@description	This API provides programmatic access to sending SMS messages on Android devices. Features include sending SMS, checking message status, device management, webhook configuration, and system health checks.
+//	@description	API del servidor de Gesvial para monitoreo de postes SOS de autopistas. Fork de capcom6/sms-gateway. Provee endpoints para gestión de postes, pruebas programadas, devices (gateways Android), webhooks y health checks.
 
-//	@contact.name	SMSGate Support
-//	@contact.email	support@sms-gate.app
-//	@contact.url	https://docs.sms-gate.app/
+//	@contact.name	Gesvial
+//	@contact.url	https://apisosgw.gvops.cl/
 
 //	@license.name	Apache 2.0
 //	@license.url	https://www.apache.org/licenses/LICENSE-2.0
 
-//	@host		localhost:3000/api
-//	@host		api.sms-gate.app
+//	@host		apisosgw.gvops.cl
 //	@schemes	https
 //
 // SMSGate Backend.

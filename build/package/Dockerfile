@@ -1,4 +1,12 @@
-# Building the binary of the App
+# Stage 1: Build frontend
+FROM node:20-alpine AS frontend
+WORKDIR /web
+COPY web/package*.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
+# Stage 2: Build Go binary
 FROM golang:1.25-alpine AS build
 
 ARG APP
@@ -18,6 +26,9 @@ RUN go mod download
 # Copy all the Code and stuff to compile everything
 COPY . .
 
+# Copy frontend build into embed location
+COPY --from=frontend /web/dist ./internal/webui/dist
+
 # Replace {APP_VERSION} with the actual version
 RUN sed -i "s/{APP_VERSION}/${APP_VERSION}/g" ./cmd/${APP}/main.go
 
@@ -25,10 +36,9 @@ RUN sed -i "s/{APP_VERSION}/${APP_VERSION}/g" ./cmd/${APP}/main.go
 RUN go generate ./...
 
 # Builds the application as a staticly linked one, to allow it to run on alpine
-# RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o app .
 RUN CGO_ENABLED=0 go build -a -installsuffix cgo -ldflags="-w -s -X github.com/android-sms-gateway/server/internal/version.AppVersion=${APP_VERSION} -X github.com/android-sms-gateway/server/internal/version.AppRelease=${APP_RELEASE_ID}" -o app ./cmd/${APP}/main.go
 
-# Moving the binary to the 'final Image' to make it smaller
+# Stage 3: Final image
 FROM alpine:3 AS prod
 
 WORKDIR /app

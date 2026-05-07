@@ -74,6 +74,7 @@ func writeProbe(c *fiber.Ctx, r health.CheckResult) error {
 	if r.Status() == health.StatusFail {
 		status = fiber.StatusServiceUnavailable
 	}
+	c.Set("X-Powered-By", "Gesvial-SOSGW")
 	return c.Status(status).JSON(makeResponse(r))
 }
 

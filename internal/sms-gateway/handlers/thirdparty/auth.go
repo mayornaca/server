@@ -11,6 +11,7 @@ import (
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/middlewares/permissions"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/middlewares/userauth"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/jwt"
+	"github.com/android-sms-gateway/server/internal/sms-gateway/users"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
@@ -19,20 +20,40 @@ import (
 type AuthHandler struct {
 	base.Handler
 
-	jwtSvc jwt.Service
+	jwtSvc   jwt.Service
+	usersSvc *users.Service
 }
 
 func NewAuthHandler(
 	jwtSvc jwt.Service,
+	usersSvc *users.Service,
 
 	logger *zap.Logger,
 	validator *validator.Validate,
 ) *AuthHandler {
 	return &AuthHandler{
-		Handler: base.Handler{Logger: logger, Validator: validator},
-
-		jwtSvc: jwtSvc,
+		Handler:  base.Handler{Logger: logger, Validator: validator},
+		jwtSvc:   jwtSvc,
+		usersSvc: usersSvc,
 	}
+}
+
+type changePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword" validate:"required"`
+	NewPassword     string `json:"newPassword"     validate:"required,min=8"`
+}
+
+func (h *AuthHandler) patchPassword(userID string, c *fiber.Ctx) error {
+	req := new(changePasswordRequest)
+	if err := h.BodyParserValidator(c, req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+
+	if err := h.usersSvc.ChangePassword(c.Context(), userID, req.CurrentPassword, req.NewPassword); err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "contraseña actual incorrecta")
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 func (h *AuthHandler) Register(router fiber.Router) {
@@ -44,6 +65,11 @@ func (h *AuthHandler) Register(router fiber.Router) {
 		h.postRefreshToken,
 	)
 	router.Delete("/token/:jti", permissions.RequireScope(ScopeTokensManage), userauth.WithUserID(h.deleteToken))
+	// cloud-gesvial.19.1: require ScopeTokensManage for password change so a
+	// narrow-scope token (e.g. tests:read) leaked from a third-party
+	// integration can't be used to take over the account. The currentPassword
+	// challenge is still in place — this only adds the scope guard.
+	router.Patch("/password", permissions.RequireScope(ScopeTokensManage), userauth.WithUserID(h.patchPassword))
 }
 
 //	@Summary		Generate token
@@ -69,10 +95,30 @@ func (h *AuthHandler) postToken(userID string, c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
+	// cloud-gesvial.22.0: aplicar scopes permitidos del usuario.
+	// Si el usuario tiene `users.scopes` poblado en BD, intersectamos los
+	// scopes solicitados con esa lista. Si NULL/vacío en BD, conservamos el
+	// comportamiento legacy (todos los scopes solicitados se conceden).
+	// Esto cierra la puerta a que un user con creds limitadas pida
+	// admin:all y reciba JWT con todos los permisos.
+	scopes := req.Scopes
+	user, err := h.usersSvc.GetByUsername(userID)
+	if err == nil && user != nil && user.AllowedScopes != nil {
+		scopes = intersectScopes(req.Scopes, user.AllowedScopes)
+		if len(scopes) == 0 {
+			h.Logger.Warn("requested scopes denied by user policy",
+				zap.String("userID", userID),
+				zap.Strings("requested", req.Scopes),
+				zap.Strings("allowed", user.AllowedScopes),
+			)
+			return fiber.NewError(fiber.StatusForbidden, "no scopes available for this user")
+		}
+	}
+
 	pair, err := h.jwtSvc.GenerateTokenPair(
 		c.Context(),
 		userID,
-		req.Scopes,
+		scopes,
 		time.Duration(req.TTL)*time.Second, //nolint:gosec // validated in the service
 	)
 	if err != nil {
@@ -86,6 +132,22 @@ func (h *AuthHandler) postToken(userID string, c *fiber.Ctx) error {
 		RefreshToken: pair.Refresh.Token,
 		ExpiresAt:    pair.Access.ExpiresAt,
 	})
+}
+
+// intersectScopes devuelve los scopes que aparecen en ambas listas. La
+// pertenencia es exacta (sin wildcard). cloud-gesvial.22.0.
+func intersectScopes(requested, allowed []string) []string {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, s := range allowed {
+		allowedSet[s] = struct{}{}
+	}
+	out := make([]string, 0, len(requested))
+	for _, s := range requested {
+		if _, ok := allowedSet[s]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 //	@Summary		Refresh token
