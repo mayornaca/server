@@ -21,6 +21,7 @@ func Run() {
 		logger.Module(),
 		logger.WithFxDefaultLogger(),
 		config.Module(),
+		fx.Invoke(WaitForDB),
 		db.Module,
 		fiberfx.Module(),
 		module(),
