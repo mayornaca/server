@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jaevor/go-nanoid"
+	"go.uber.org/zap"
 )
 
 // Event is the wire format streamed over SSE to the panel. It is intentionally
@@ -52,16 +53,18 @@ type Service struct {
 	mu          sync.RWMutex
 	subscribers map[string]*subscriber
 	idgen       func() string
+	logger      *zap.Logger
 }
 
 // NewService constructs a Service. Buffer size of 16 events per subscriber
 // is enough to absorb a small burst of concurrent test schedules without
-// dropping. Past that we drop the oldest.
-func NewService() *Service {
+// dropping. Past that we drop with a structured log warn (Fase 3 plan QA).
+func NewService(logger *zap.Logger) *Service {
 	idgen, _ := nanoid.Standard(21)
 	return &Service{
 		subscribers: make(map[string]*subscriber),
 		idgen:       idgen,
+		logger:      logger.Named("paneleventsbus"),
 	}
 }
 
@@ -78,7 +81,16 @@ func (s *Service) Publish(ev Event) {
 		select {
 		case sub.ch <- ev:
 		default:
-			// drop for slow consumer
+			// Back-pressure observable: log el drop con id del subscriber + tipo
+			// del evento para que el operador detecte panel admin "stale".
+			// No retornamos error porque Publish es broadcast multi-subscriber
+			// (un consumer lento no debe bloquear a los demás).
+			s.logger.Warn("event dropped, subscriber buffer full",
+				zap.String("subscriber_id", sub.id),
+				zap.String("event_type", string(ev.Type)),
+				zap.String("resource_id", ev.ResourceID),
+				zap.Error(ErrBufferFull),
+			)
 		}
 	}
 }

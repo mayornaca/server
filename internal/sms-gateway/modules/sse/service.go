@@ -64,6 +64,7 @@ func (s *Service) Send(deviceID string, event Event) error {
 	}
 
 	sent := 0
+	bufferFull := false
 	for _, conn := range connections {
 		select {
 		case conn.channel <- eventWrapper{string(event.Type), data}:
@@ -75,15 +76,23 @@ func (s *Service) Send(deviceID string, event Event) error {
 				zap.String("connection_id", conn.id),
 			)
 		default:
+			bufferFull = true
 			s.logger.Warn(
 				"Connection buffer full while sending event",
 				zap.String("device_id", deviceID),
 				zap.String("connection_id", conn.id),
+				zap.Error(ErrBufferFull),
 			)
 		}
 	}
 
 	if sent == 0 {
+		// Diferenciar back-pressure de "no hay conexión": ambos suben sent=0
+		// pero requieren respuestas distintas del caller (retry vs dead-letter).
+		// Fase 3 plan QA 2026-05-17.
+		if bufferFull {
+			return fmt.Errorf("%w: device %s", ErrBufferFull, deviceID)
+		}
 		return fmt.Errorf("%w: device %s", ErrNoConnection, deviceID)
 	}
 

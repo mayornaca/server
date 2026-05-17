@@ -871,21 +871,21 @@ func (s *Service) ScheduleTest(userID string, postID string, testType string, de
 		}
 	}(post.UserID, post.ID)
 
-	// Notify gateway via events service (async, best-effort).
+	// Notify gateway via events service (sync con timeout — Fase 3 plan QA).
 	// Use post.UserID (the real owner of the post) instead of userID (the
 	// caller). When an admin with admin:all schedules over another user's
-	// post, the SSE/FCM event must reach the OWNER's gateways — not the
-	// admin's (which often have stale/abandoned devices).
-	go func(ownerID string, deviceIDPtr *string, result *TestResult) {
-		event := events.NewTestRequestedEvent(result.ID, result.PostID, string(result.TestType))
-		if ntfErr := s.eventsSvc.Notify(ownerID, deviceIDPtr, event); ntfErr != nil {
-			s.logger.Warn("failed to notify gateway of scheduled test",
-				zap.String("testResultID", result.ID),
-				zap.String("postID", result.PostID),
-				zap.String("userID", ownerID),
-				zap.Error(ntfErr))
-		}
-	}(post.UserID, deviceIDPtr, result)
+	// post, el SSE/FCM event debe llegar al OWNER's gateways — no a los del
+	// admin (often stale/abandoned devices).
+	notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer notifyCancel()
+	event := events.NewTestRequestedEvent(result.ID, result.PostID, string(result.TestType))
+	if ntfErr := s.eventsSvc.Notify(notifyCtx, post.UserID, deviceIDPtr, event); ntfErr != nil {
+		s.logger.Warn("failed to notify gateway of scheduled test",
+			zap.String("testResultID", result.ID),
+			zap.String("postID", result.PostID),
+			zap.String("userID", post.UserID),
+			zap.Error(ntfErr))
+	}
 
 	return result, nil
 }

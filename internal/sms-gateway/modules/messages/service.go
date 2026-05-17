@@ -250,16 +250,19 @@ func (s *Service) Enqueue(device models.Device, message MessageIn, opts EnqueueO
 	); cacheErr != nil {
 		s.logger.Warn("failed to cache message", zap.String("id", msg.ExtID), zap.Error(cacheErr))
 	}
-	go func(userID, deviceID string) {
-		if ntfErr := s.eventsSvc.Notify(userID, &deviceID, events.NewMessageEnqueuedEvent()); ntfErr != nil {
-			s.logger.Error(
-				"failed to notify device",
-				zap.Error(ntfErr),
-				zap.String("user_id", userID),
-				zap.String("device_id", deviceID),
-			)
-		}
-	}(device.UserID, device.ID)
+	// Sync con timeout — Fase 3 plan QA reemplaza goroutine anónima sin await.
+	// El mensaje ya está insertado en DB + cache; el Notify es best-effort,
+	// pero ahora los errores se loguean visible y propagan a observabilidad.
+	notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer notifyCancel()
+	if ntfErr := s.eventsSvc.Notify(notifyCtx, device.UserID, &device.ID, events.NewMessageEnqueuedEvent()); ntfErr != nil {
+		s.logger.Error(
+			"failed to notify device",
+			zap.Error(ntfErr),
+			zap.String("user_id", device.UserID),
+			zap.String("device_id", device.ID),
+		)
+	}
 
 	return state, nil
 }
@@ -321,7 +324,9 @@ func (s *Service) prepareMessage(device models.Device, message MessageIn, opts E
 func (s *Service) ExportInbox(device models.Device, since, until time.Time) error {
 	event := events.NewMessagesExportRequestedEvent(since, until)
 
-	if err := s.eventsSvc.Notify(device.UserID, &device.ID, event); err != nil {
+	exportCtx, exportCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer exportCancel()
+	if err := s.eventsSvc.Notify(exportCtx, device.UserID, &device.ID, event); err != nil {
 		return fmt.Errorf("failed to notify device: %w", err)
 	}
 

@@ -54,14 +54,15 @@ func NewService(params ServiceParams) *Service {
 	}
 }
 
-// notifyDevices asynchronously emits SettingsUpdatedEvent so the gateway app
-// re-pulls settings (including the updated testing.schedules list).
+// notifyDevices emite SettingsUpdatedEvent (sync con timeout) para que el
+// gateway re-pulle settings incluyendo la lista actualizada de testing.schedules.
+// Fase 3 plan QA: reemplaza goroutine anónima sin await.
 func (s *Service) notifyDevices(userID string) {
-	go func(userID string) {
-		if err := s.eventsSvc.Notify(userID, nil, events.NewSettingsUpdatedEvent()); err != nil {
-			s.logger.Warn("failed to notify devices of schedule change", zap.Error(err))
-		}
-	}(userID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.eventsSvc.Notify(ctx, userID, nil, events.NewSettingsUpdatedEvent()); err != nil {
+		s.logger.Warn("failed to notify devices of schedule change", zap.Error(err))
+	}
 }
 
 // ValidateCronExpression returns nil when expr parses as a standard 5-field cron.

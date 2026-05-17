@@ -3,8 +3,10 @@ package events
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/android-sms-gateway/server/internal/sms-gateway/models"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/devices"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/push"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/sse"
@@ -18,10 +20,10 @@ const (
 )
 
 type Service struct {
-	deviceSvc *devices.Service
+	deviceSvc deviceSelector
 
-	sseSvc  *sse.Service
-	pushSvc *push.Service
+	sseSvc  sseSender
+	pushSvc pushEnqueuer
 
 	pubsub pubsub.PubSub
 
@@ -44,12 +46,21 @@ func NewService(
 	}
 }
 
-func (s *Service) Notify(userID string, deviceID *string, event Event) error {
+// Notify acepta ctx del caller para honrar timeouts/cancelación river-down
+// (handler HTTP, lifecycle worker, etc.). Si ctx es nil, fallback a Background
+// pero ese es un caller mal diseñado — debería ser intentional.
+// Fase 3 plan QA 2026-05-17: reemplaza el patrón viejo de goroutines anónimas
+// sin await `go func() { Notify(...) }()` por llamadas sincrónicas con
+// context.WithTimeout(callerCtx, 5s) para que los errores se propaguen.
+func (s *Service) Notify(ctx context.Context, userID string, deviceID *string, event Event) error {
 	if event.EventType == "" {
 		return fmt.Errorf("%w: event type is empty", ErrValidationFailed)
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	subCtx, cancel := context.WithTimeout(context.Background(), pubsubTimeout)
+	subCtx, cancel := context.WithTimeout(ctx, pubsubTimeout)
 	defer cancel()
 
 	wrapper := eventWrapper{
@@ -139,57 +150,90 @@ func (s *Service) processEvent(wrapper *eventWrapper) {
 	}
 
 	for _, device := range devices {
-		if device.PushToken != nil {
-			start := time.Now()
-			if enqErr := s.pushSvc.Enqueue(*device.PushToken, push.Event{
-				Type: wrapper.Event.EventType,
-				Data: eventDataWithID(wrapper.Event),
-			}); enqErr != nil {
-				s.logger.Error("event delivery failed",
-					zap.String("event_id", wrapper.Event.ID),
-					zap.String("event_type", string(wrapper.Event.EventType)),
-					zap.String("user_id", wrapper.UserID),
-					zap.String("device_id", device.ID),
-					zap.String("channel", "fcm"),
-					zap.Error(enqErr),
-				)
-			} else {
-				s.logger.Info("event delivered",
-					zap.String("event_id", wrapper.Event.ID),
-					zap.String("event_type", string(wrapper.Event.EventType)),
-					zap.String("user_id", wrapper.UserID),
-					zap.String("device_id", device.ID),
-					zap.String("channel", "fcm"),
-					zap.Duration("latency_ms", time.Since(start)),
-				)
-			}
-			continue
-		}
-
-		start := time.Now()
-		if sseErr := s.sseSvc.Send(device.ID, sse.Event{
-			Type: wrapper.Event.EventType,
-			Data: eventDataWithID(wrapper.Event),
-		}); sseErr != nil {
-			s.logger.Error("event delivery failed",
-				zap.String("event_id", wrapper.Event.ID),
-				zap.String("event_type", string(wrapper.Event.EventType)),
-				zap.String("user_id", wrapper.UserID),
-				zap.String("device_id", device.ID),
-				zap.String("channel", "sse"),
-				zap.Error(sseErr),
-			)
-		} else {
-			s.logger.Info("event delivered",
-				zap.String("event_id", wrapper.Event.ID),
-				zap.String("event_type", string(wrapper.Event.EventType)),
-				zap.String("user_id", wrapper.UserID),
-				zap.String("device_id", device.ID),
-				zap.String("channel", "sse"),
-				zap.Duration("latency_ms", time.Since(start)),
-			)
-		}
+		s.deliverParallel(wrapper, device)
 	}
+}
+
+// deliverParallel ejecuta SSE y FCM en paralelo (no excluyente) — decisión
+// arquitectural 3 del plan QA 2026-05-17. SSE siempre intenta porque es la
+// ruta de baja latencia cuando la app está foreground. FCM intenta SOLO si
+// el device reportó un pushToken — esa es la red de seguridad para apps en
+// background o tras Doze. La app Android deduplica por event_id (nanoid)
+// cuando llegue el mismo evento por ambos canales.
+//
+// Errores de un canal NO bloquean al otro. Cada delivery loguea su propio
+// outcome con channel + latency_ms para correlación en grep `event_id=...`.
+func (s *Service) deliverParallel(wrapper *eventWrapper, device models.Device) {
+	var wg sync.WaitGroup
+	payload := eventDataWithID(wrapper.Event)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.deliverSSE(wrapper, device, payload)
+	}()
+
+	if device.PushToken != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.deliverFCM(wrapper, device, *device.PushToken, payload)
+		}()
+	}
+
+	wg.Wait()
+}
+
+func (s *Service) deliverSSE(wrapper *eventWrapper, device models.Device, payload map[string]string) {
+	start := time.Now()
+	if err := s.sseSvc.Send(device.ID, sse.Event{
+		Type: wrapper.Event.EventType,
+		Data: payload,
+	}); err != nil {
+		s.logger.Error("event delivery failed",
+			zap.String("event_id", wrapper.Event.ID),
+			zap.String("event_type", string(wrapper.Event.EventType)),
+			zap.String("user_id", wrapper.UserID),
+			zap.String("device_id", device.ID),
+			zap.String("channel", "sse"),
+			zap.Error(err),
+		)
+		return
+	}
+	s.logger.Info("event delivered",
+		zap.String("event_id", wrapper.Event.ID),
+		zap.String("event_type", string(wrapper.Event.EventType)),
+		zap.String("user_id", wrapper.UserID),
+		zap.String("device_id", device.ID),
+		zap.String("channel", "sse"),
+		zap.Duration("latency_ms", time.Since(start)),
+	)
+}
+
+func (s *Service) deliverFCM(wrapper *eventWrapper, device models.Device, token string, payload map[string]string) {
+	start := time.Now()
+	if err := s.pushSvc.Enqueue(token, push.Event{
+		Type: wrapper.Event.EventType,
+		Data: payload,
+	}); err != nil {
+		s.logger.Error("event delivery failed",
+			zap.String("event_id", wrapper.Event.ID),
+			zap.String("event_type", string(wrapper.Event.EventType)),
+			zap.String("user_id", wrapper.UserID),
+			zap.String("device_id", device.ID),
+			zap.String("channel", "fcm"),
+			zap.Error(err),
+		)
+		return
+	}
+	s.logger.Info("event delivered",
+		zap.String("event_id", wrapper.Event.ID),
+		zap.String("event_type", string(wrapper.Event.EventType)),
+		zap.String("user_id", wrapper.UserID),
+		zap.String("device_id", device.ID),
+		zap.String("channel", "fcm"),
+		zap.Duration("latency_ms", time.Since(start)),
+	)
 }
 
 // eventDataWithID retorna el map data del event con event_id agregado para

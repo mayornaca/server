@@ -187,6 +187,47 @@ func TestDispatcher_Retries_OnNon2xx(t *testing.T) {
 	t.Fatalf("expected at least 2 attempts (1 fail + 1 retry succeeds), got %d", attempts.Load())
 }
 
+// TestDispatcher_PropagatesEventIDAsHeader valida la decisión arquitectural 4
+// del plan QA 2026-05-17 — Fase 3: cada webhook POST lleva un header
+// X-Event-Id (nanoid 21 chars) generado en Publish y propagado a postOnce.
+// El header permite correlación end-to-end entre logs Zap del cloud, el
+// payload SSE/FCM del mismo evento, y el body recibido por el operador en
+// su URL de webhook.
+func TestDispatcher_PropagatesEventIDAsHeader(t *testing.T) {
+	received := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- r.Header.Get("X-Event-Id")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ps := pubsub.NewMemory()
+	defer ps.Close() //nolint:errcheck
+	lookup := newLookup(srv.URL, smsgateway.WebhookEventSmsSent)
+
+	d := newDispatcher(Config{ServerSideEnabled: true, Timeout: 2 * time.Second, MaxRetries: 0}, lookup, ps)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() { _ = d.Run(ctx) }()
+	time.Sleep(50 * time.Millisecond)
+
+	d.Publish(ctx, "u1", nil, smsgateway.WebhookEventSmsSent, map[string]any{"messageId": "m1"})
+
+	select {
+	case eventID := <-received:
+		if eventID == "" {
+			t.Fatal("X-Event-Id header missing or empty")
+		}
+		if len(eventID) != 21 {
+			t.Errorf("X-Event-Id should be nanoid 21 chars, got %d: %q", len(eventID), eventID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for POST")
+	}
+}
+
 // TestOutboundRequest_JSONShape locks the wire format so future refactors
 // don't silently break receivers that parse these POSTs.
 func TestOutboundRequest_JSONShape(t *testing.T) {
