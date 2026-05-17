@@ -27,7 +27,6 @@ type EnqueueOptions struct {
 type Service struct {
 	config Config
 
-	metrics       *metrics
 	cache         *cache
 	messages      *Repository
 	hashingWorker *hashingWorker
@@ -41,7 +40,6 @@ type Service struct {
 
 func NewService(
 	config Config,
-	metrics *metrics,
 	cache *cache,
 	messages *Repository,
 	eventsSvc *events.Service,
@@ -53,7 +51,6 @@ func NewService(
 	return &Service{
 		config: config,
 
-		metrics:       metrics,
 		cache:         cache,
 		messages:      messages,
 		hashingWorker: hashingTask,
@@ -125,7 +122,6 @@ func (s *Service) UpdateState(device *models.Device, message MessageStateIn) err
 		s.logger.Warn("failed to cache message", zap.String("id", existing.ExtID), zap.Error(cacheErr))
 	}
 	s.hashingWorker.Enqueue(existing.ID)
-	s.metrics.IncTotal(string(existing.State))
 
 	// gesvial.14 homologation: dispatch server-side webhook for recipient state
 	// updates. No-op when WEBHOOKS__SERVER_SIDE_ENABLED=false (default). Fires
@@ -192,15 +188,12 @@ func (s *Service) SelectStates(
 func (s *Service) GetState(userID string, id string) (*MessageStateOut, error) {
 	dto, err := s.cache.Get(context.Background(), userID, id)
 	if err == nil {
-		s.metrics.IncCache(true)
-
 		// Cache nil entries represent "not found" and prevent repeated lookups
 		if dto == nil {
 			return nil, ErrMessageNotFound
 		}
 		return dto, nil
 	}
-	s.metrics.IncCache(false)
 
 	message, err := s.messages.Get(
 		*new(SelectFilter).WithExtID(id).WithUserID(userID),
@@ -257,8 +250,6 @@ func (s *Service) Enqueue(device models.Device, message MessageIn, opts EnqueueO
 	); cacheErr != nil {
 		s.logger.Warn("failed to cache message", zap.String("id", msg.ExtID), zap.Error(cacheErr))
 	}
-	s.metrics.IncTotal(string(msg.State))
-
 	go func(userID, deviceID string) {
 		if ntfErr := s.eventsSvc.Notify(userID, &deviceID, events.NewMessageEnqueuedEvent()); ntfErr != nil {
 			s.logger.Error(

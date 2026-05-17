@@ -13,7 +13,6 @@ import (
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/devices"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/events"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/messages"
-	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/metrics"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/paneleventsbus"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/posts"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/schedules"
@@ -67,7 +66,6 @@ func Module() fx.Option {
 		schedules.Module(),
 		tests.Module(),
 		paneleventsbus.Module(),
-		metrics.Module(),
 		sse.Module(),
 		online.Module(),
 		jwt.Module(),

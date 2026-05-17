@@ -25,8 +25,6 @@ type Service struct {
 
 	pubsub pubsub.PubSub
 
-	metrics *metrics
-
 	logger *zap.Logger
 }
 
@@ -35,19 +33,14 @@ func NewService(
 	sseSvc *sse.Service,
 	pushSvc *push.Service,
 	pubsub pubsub.PubSub,
-	metrics *metrics,
 	logger *zap.Logger,
 ) *Service {
 	return &Service{
 		deviceSvc: devicesSvc,
 		sseSvc:    sseSvc,
 		pushSvc:   pushSvc,
-
-		metrics: metrics,
-
-		pubsub: pubsub,
-
-		logger: logger,
+		pubsub:    pubsub,
+		logger:    logger,
 	}
 }
 
@@ -67,16 +60,12 @@ func (s *Service) Notify(userID string, deviceID *string, event Event) error {
 
 	wrapperBytes, err := wrapper.serialize()
 	if err != nil {
-		s.metrics.IncrementFailed(string(event.EventType), DeliveryTypeUnknown, FailureReasonSerializationError)
 		return fmt.Errorf("failed to serialize event wrapper: %w", err)
 	}
 
 	if pubErr := s.pubsub.Publish(subCtx, pubsubTopic, wrapperBytes); pubErr != nil {
-		s.metrics.IncrementFailed(string(event.EventType), DeliveryTypeUnknown, FailureReasonPublishError)
 		return fmt.Errorf("failed to publish event: %w", pubErr)
 	}
-
-	s.metrics.IncrementEnqueued(string(event.EventType))
 
 	return nil
 }
@@ -101,7 +90,6 @@ func (s *Service) Run(ctx context.Context) error {
 			}
 			wrapper := new(eventWrapper)
 			if jsonErr := wrapper.deserialize(msg.Data); jsonErr != nil {
-				s.metrics.IncrementFailed(EventTypeUnknown, DeliveryTypeUnknown, FailureReasonSerializationError)
 				s.logger.Error("failed to deserialize event wrapper", zap.Error(jsonErr))
 				continue
 			}
@@ -111,16 +99,15 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 // safeProcessEvent wraps processEvent with panic recovery so a single bad
-// event (nil deref in a nested handler, runtime error in metrics) doesn't
-// take down the whole event loop. Docker would restart the process on
-// crash, but that drops every in-flight push notification — losing them is
-// strictly worse than logging and continuing. cloud-gesvial.19.1 M-MED-1.
+// event (nil deref in a nested handler, runtime error) doesn't take down
+// the whole event loop. cloud-gesvial.19.1 M-MED-1.
 func (s *Service) safeProcessEvent(wrapper *eventWrapper) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			s.logger.Error("event processing panicked",
 				zap.Any("recover", rec),
 				zap.String("event_type", string(wrapper.Event.EventType)),
+				zap.String("event_id", wrapper.Event.ID),
 			)
 		}
 	}()
@@ -128,7 +115,6 @@ func (s *Service) safeProcessEvent(wrapper *eventWrapper) {
 }
 
 func (s *Service) processEvent(wrapper *eventWrapper) {
-	// Load devices from database
 	filters := []devices.SelectFilter{}
 	if wrapper.DeviceID != nil {
 		filters = append(filters, devices.WithID(*wrapper.DeviceID))
@@ -136,54 +122,84 @@ func (s *Service) processEvent(wrapper *eventWrapper) {
 
 	devices, err := s.deviceSvc.Select(wrapper.UserID, filters...)
 	if err != nil {
-		s.logger.Error("failed to select devices", zap.String("user_id", wrapper.UserID), zap.Error(err))
+		s.logger.Error("failed to select devices",
+			zap.String("event_id", wrapper.Event.ID),
+			zap.String("user_id", wrapper.UserID),
+			zap.Error(err),
+		)
 		return
 	}
 
 	if len(devices) == 0 {
-		s.logger.Info("no devices found for user", zap.String("user_id", wrapper.UserID))
+		s.logger.Info("no devices found for user",
+			zap.String("event_id", wrapper.Event.ID),
+			zap.String("user_id", wrapper.UserID),
+		)
 		return
 	}
 
-	// Process each device
 	for _, device := range devices {
 		if device.PushToken != nil {
-			// Device has push token, use push service
+			start := time.Now()
 			if enqErr := s.pushSvc.Enqueue(*device.PushToken, push.Event{
 				Type: wrapper.Event.EventType,
-				Data: wrapper.Event.Data,
+				Data: eventDataWithID(wrapper.Event),
 			}); enqErr != nil {
-				s.logger.Error(
-					"failed to enqueue push notification",
+				s.logger.Error("event delivery failed",
+					zap.String("event_id", wrapper.Event.ID),
+					zap.String("event_type", string(wrapper.Event.EventType)),
 					zap.String("user_id", wrapper.UserID),
 					zap.String("device_id", device.ID),
+					zap.String("channel", "fcm"),
 					zap.Error(enqErr),
 				)
-				s.metrics.IncrementFailed(
-					string(wrapper.Event.EventType),
-					DeliveryTypePush,
-					FailureReasonProviderFailed,
-				)
 			} else {
-				s.metrics.IncrementSent(string(wrapper.Event.EventType), DeliveryTypePush)
+				s.logger.Info("event delivered",
+					zap.String("event_id", wrapper.Event.ID),
+					zap.String("event_type", string(wrapper.Event.EventType)),
+					zap.String("user_id", wrapper.UserID),
+					zap.String("device_id", device.ID),
+					zap.String("channel", "fcm"),
+					zap.Duration("latency_ms", time.Since(start)),
+				)
 			}
 			continue
 		}
 
-		// No push token, use SSE service
+		start := time.Now()
 		if sseErr := s.sseSvc.Send(device.ID, sse.Event{
 			Type: wrapper.Event.EventType,
-			Data: wrapper.Event.Data,
+			Data: eventDataWithID(wrapper.Event),
 		}); sseErr != nil {
-			s.logger.Error(
-				"failed to send SSE notification",
+			s.logger.Error("event delivery failed",
+				zap.String("event_id", wrapper.Event.ID),
+				zap.String("event_type", string(wrapper.Event.EventType)),
 				zap.String("user_id", wrapper.UserID),
 				zap.String("device_id", device.ID),
+				zap.String("channel", "sse"),
 				zap.Error(sseErr),
 			)
-			s.metrics.IncrementFailed(string(wrapper.Event.EventType), DeliveryTypeSSE, FailureReasonProviderFailed)
 		} else {
-			s.metrics.IncrementSent(string(wrapper.Event.EventType), DeliveryTypeSSE)
+			s.logger.Info("event delivered",
+				zap.String("event_id", wrapper.Event.ID),
+				zap.String("event_type", string(wrapper.Event.EventType)),
+				zap.String("user_id", wrapper.UserID),
+				zap.String("device_id", device.ID),
+				zap.String("channel", "sse"),
+				zap.Duration("latency_ms", time.Since(start)),
+			)
 		}
 	}
+}
+
+// eventDataWithID retorna el map data del event con event_id agregado para
+// que la app Android pueda deduplicar por id cuando llegue el mismo evento
+// vía SSE y FCM en paralelo (Fase 3 plan QA).
+func eventDataWithID(ev Event) map[string]string {
+	out := make(map[string]string, len(ev.Data)+1)
+	for k, v := range ev.Data {
+		out[k] = v
+	}
+	out["event_id"] = ev.ID
+	return out
 }

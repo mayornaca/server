@@ -11,9 +11,19 @@ import (
 
 	"github.com/android-sms-gateway/client-go/smsgateway"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/pubsub"
+	"github.com/jaevor/go-nanoid"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
+
+// eventIDGen produce nanoid de 21 chars para el header X-Event-Id de los
+// webhooks salientes. Correlación end-to-end con logs Zap (mismo id) y
+// logcat del device cuando emita el mismo evento por SSE/FCM.
+// cloud-gesvial.22.2 (Fase 2 plan QA 2026-05-17).
+var eventIDGen = func() func() string {
+	g, _ := nanoid.Standard(21)
+	return g
+}()
 
 // dispatcherPubsubTopic is the in-process channel for server-side webhook
 // dispatch. Published from messages.Service.UpdateState (when the gateway
@@ -103,6 +113,7 @@ func (d *Dispatcher) Publish(ctx context.Context, userID string, deviceID *strin
 	}
 
 	msg := DispatchEvent{
+		EventID:  eventIDGen(),
 		UserID:   userID,
 		DeviceID: deviceID,
 		Event:    event,
@@ -198,7 +209,7 @@ func (d *Dispatcher) dispatch(ctx context.Context, hook *Webhook, ev DispatchEve
 
 	maxAttempts := max(int(d.cfg.MaxRetries)+1, 1)
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		status, attemptErr := d.postOnce(ctx, hook.URL, bodyBytes)
+		status, attemptErr := d.postOnce(ctx, hook.URL, ev.EventID, bodyBytes)
 		if attemptErr == nil && status >= 200 && status < 300 {
 			d.logger.Info("webhook delivered",
 				zap.String("webhook_id", hook.ExtID),
@@ -253,13 +264,16 @@ func (d *Dispatcher) dispatch(ctx context.Context, hook *Webhook, ev DispatchEve
 	}
 }
 
-func (d *Dispatcher) postOnce(ctx context.Context, url string, body []byte) (int, error) {
+func (d *Dispatcher) postOnce(ctx context.Context, url, eventID string, body []byte) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return 0, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "gesvial-sosgw/1.x (server; homologation)")
+	if eventID != "" {
+		req.Header.Set("X-Event-Id", eventID)
+	}
 
 	resp, err := d.client.Do(req)
 	if err != nil {

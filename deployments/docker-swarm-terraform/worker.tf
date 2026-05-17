@@ -33,21 +33,6 @@ resource "docker_service" "worker" {
     }
   }
 
-  #region Prometheus support
-  labels {
-    label = "prometheus.io/scrape"
-    value = "true"
-  }
-  labels {
-    label = "prometheus.io/port"
-    value = "3000"
-  }
-  labels {
-    label = "prometheus.io/job"
-    value = "worker"
-  }
-  #endregion
-
   rollback_config {
     order   = "stop-first"
     monitor = "5s"

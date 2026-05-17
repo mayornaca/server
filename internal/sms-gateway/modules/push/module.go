@@ -14,7 +14,6 @@ func Module() fx.Option {
 		fx.Decorate(func(log *zap.Logger) *zap.Logger {
 			return log.Named("push")
 		}),
-		fx.Provide(newMetrics, fx.Private),
 		fx.Provide(
 			newClient,
 			fx.Private,

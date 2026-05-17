@@ -16,7 +16,6 @@ func Module() fx.Option {
 			return factory.New("messages")
 		}, fx.Private),
 
-		fx.Provide(newMetrics, fx.Private),
 		fx.Provide(NewRepository, fx.Private),
 		fx.Provide(newHashingWorker, fx.Private),
 		fx.Provide(newCache, fx.Private),

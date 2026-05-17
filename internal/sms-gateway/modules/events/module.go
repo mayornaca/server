@@ -12,7 +12,6 @@ func Module() fx.Option {
 		fx.Decorate(func(log *zap.Logger) *zap.Logger {
 			return log.Named("events")
 		}),
-		fx.Provide(newMetrics, fx.Private),
 		fx.Provide(NewService),
 		fx.Invoke(
 			fxutil.RegisterRunnable[*Service](),

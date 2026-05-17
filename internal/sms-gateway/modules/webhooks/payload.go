@@ -9,6 +9,7 @@ import (
 // DispatchEvent is the in-process envelope placed on the pubsub topic. It carries
 // the minimum the consumer needs to look up webhooks and build the HTTP POST body.
 type DispatchEvent struct {
+	EventID  string                  `json:"event_id"`
 	UserID   string                  `json:"userId"`
 	DeviceID *string                 `json:"deviceId,omitempty"`
 	Event    smsgateway.WebhookEvent `json:"event"`

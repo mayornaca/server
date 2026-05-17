@@ -21,18 +21,14 @@ type service struct {
 
 	cache cache.Cache
 
-	logger  *zap.Logger
-	metrics *metrics
+	logger *zap.Logger
 }
 
-func New(devicesSvc *devices.Service, cache cache.Cache, logger *zap.Logger, metrics *metrics) Service {
+func New(devicesSvc *devices.Service, cache cache.Cache, logger *zap.Logger) Service {
 	return &service{
 		devicesSvc: devicesSvc,
-
-		cache: cache,
-
-		logger:  logger,
-		metrics: metrics,
+		cache:      cache,
+		logger:     logger,
 	}
 }
 
@@ -58,71 +54,41 @@ func (s *service) SetOnline(ctx context.Context, deviceID string) {
 
 	s.logger.Debug("Setting online status", zap.String("device_id", deviceID), zap.String("last_seen", dt))
 
-	var err error
-	s.metrics.ObserveCacheLatency(func() {
-		if err = s.cache.Set(ctx, deviceID, []byte(dt)); err != nil {
-			s.metrics.IncrementCacheOperation(operationSet, statusError)
-			s.logger.Error("failed to set online status", zap.String("device_id", deviceID), zap.Error(err))
-			s.metrics.IncrementStatusSet(false)
-		}
-	})
-
-	if err != nil {
+	if err := s.cache.Set(ctx, deviceID, []byte(dt)); err != nil {
+		s.logger.Error("failed to set online status", zap.String("device_id", deviceID), zap.Error(err))
 		return
 	}
 
-	s.metrics.IncrementCacheOperation(operationSet, statusSuccess)
 	s.logger.Debug("Online status set", zap.String("device_id", deviceID))
-	s.metrics.IncrementStatusSet(true)
 }
 
 func (s *service) persist(ctx context.Context) error {
-	var drainErr, persistErr error
+	items, err := s.cache.Drain(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to drain cache: %w", err)
+	}
 
-	s.metrics.ObservePersistenceLatency(func() {
-		items, err := s.cache.Drain(ctx)
-		if err != nil {
-			drainErr = fmt.Errorf("failed to drain cache: %w", err)
-			s.metrics.IncrementCacheOperation(operationDrain, statusError)
-			return
+	if len(items) == 0 {
+		s.logger.Debug("No online statuses to persist")
+		return nil
+	}
+	s.logger.Debug("Drained cache", zap.Int("count", len(items)))
+
+	timestamps := maps.MapValues(items, func(v []byte) time.Time {
+		t, parseErr := time.Parse(time.RFC3339, string(v))
+		if parseErr != nil {
+			s.logger.Warn("failed to parse last seen", zap.String("last_seen", string(v)), zap.Error(parseErr))
+			return time.Now().UTC()
 		}
-		s.metrics.IncrementCacheOperation(operationDrain, statusSuccess)
-		s.metrics.SetBatchSize(len(items))
-
-		if len(items) == 0 {
-			s.logger.Debug("No online statuses to persist")
-			return
-		}
-		s.logger.Debug("Drained cache", zap.Int("count", len(items)))
-
-		timestamps := maps.MapValues(items, func(v []byte) time.Time {
-			t, parseErr := time.Parse(time.RFC3339, string(v))
-			if parseErr != nil {
-				s.logger.Warn("failed to parse last seen", zap.String("last_seen", string(v)), zap.Error(parseErr))
-				return time.Now().UTC()
-			}
-
-			return t
-		})
-
-		s.logger.Debug("Parsed last seen timestamps", zap.Int("count", len(timestamps)))
-
-		if seenErr := s.devicesSvc.SetLastSeen(ctx, timestamps); seenErr != nil {
-			persistErr = fmt.Errorf("failed to set last seen: %w", seenErr)
-			s.metrics.IncrementPersistenceError()
-			return
-		}
-
-		s.logger.Info("Set last seen", zap.Int("count", len(timestamps)))
+		return t
 	})
 
-	if drainErr != nil {
-		return drainErr
+	s.logger.Debug("Parsed last seen timestamps", zap.Int("count", len(timestamps)))
+
+	if seenErr := s.devicesSvc.SetLastSeen(ctx, timestamps); seenErr != nil {
+		return fmt.Errorf("failed to set last seen: %w", seenErr)
 	}
 
-	if persistErr != nil {
-		return persistErr
-	}
-
+	s.logger.Info("Set last seen", zap.Int("count", len(timestamps)))
 	return nil
 }
