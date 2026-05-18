@@ -45,32 +45,50 @@ jobs:
           args: --timeout=5m
 
   test:
+    # Unit tests del módulo principal. Sin gate de cobertura porcentual
+    # (Fase 5 plan QA 2026-05-17 — "pruebas reales sobre cobertura numérica").
     name: Test
     runs-on: ubuntu-latest
     steps:
-      # step 1: checkout repository code
       - name: Checkout code into workspace directory
         uses: actions/checkout@v4
 
-      # step 2: set up go
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: stable
 
-      # step 3: install dependencies
       - name: Install all Go dependencies
         run: go mod download
 
-      # step 4: run test
-      - name: Run coverage
-        run: go test -race -shuffle=on -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+      - name: Run unit tests
+        run: go test -race -shuffle=on -count=1 ./...
 
-      # step 5: upload coverage
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+  e2e:
+    # Gate único de Fase 5: test/e2e/** verde contra docker compose live.
+    # Levanta el stack completo (server public + private + db + on-demand
+    # worker-resilience + resto de profiles cuando aplica) y corre todos
+    # los tests del submódulo test/e2e/. Si un test e2e falla, falla el
+    # workflow — esa es la garantía de "el bug X ya no sucede".
+    name: E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code into workspace directory
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          go-version: stable
+
+      - name: Install all Go dependencies
+        run: cd test/e2e && go mod download
+
+      - name: Run e2e tests
+        # El harness en test/e2e/main_test.go levanta `docker compose up -d
+        # --build` y hace teardown al final. Cada test puede levantar profiles
+        # adicionales (ej. resilience) y limpiarlos con t.Cleanup.
+        run: cd test/e2e && go test -count=1 -timeout 10m .
 
   benchmark:
     name: Benchmark
