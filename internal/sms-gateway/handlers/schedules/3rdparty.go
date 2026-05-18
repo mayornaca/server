@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/apierrors"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/base"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/middlewares/permissions"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/middlewares/userauth"
@@ -77,7 +78,7 @@ func (h *ThirdPartyController) get(userID string, c *fiber.Ctx) error {
 	item, err := h.schedulesSvc.Get(permissions.EffectiveUserID(c, userID), id)
 	if err != nil {
 		if errors.Is(err, schedules.ErrNotFound) {
-			return fiber.NewError(fiber.StatusNotFound, "schedule not found")
+			return apierrors.ErrScheduleNotFound
 		}
 		return fmt.Errorf("failed to get schedule: %w", err)
 	}
@@ -120,7 +121,7 @@ func (h *ThirdPartyController) put(userID string, c *fiber.Ctx) error {
 	updated, err := h.schedulesSvc.Update(permissions.EffectiveUserID(c, userID), id, req.toModel())
 	if err != nil {
 		if errors.Is(err, schedules.ErrNotFound) {
-			return fiber.NewError(fiber.StatusNotFound, "schedule not found")
+			return apierrors.ErrScheduleNotFound
 		}
 		if errors.Is(err, schedules.ErrInvalidCronExpr) {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
@@ -134,7 +135,7 @@ func (h *ThirdPartyController) delete(userID string, c *fiber.Ctx) error {
 	id := c.Params("id")
 	if err := h.schedulesSvc.Delete(permissions.EffectiveUserID(c, userID), id); err != nil {
 		if errors.Is(err, schedules.ErrNotFound) {
-			return fiber.NewError(fiber.StatusNotFound, "schedule not found")
+			return apierrors.ErrScheduleNotFound
 		}
 		return fmt.Errorf("failed to delete schedule: %w", err)
 	}

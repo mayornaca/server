@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/apierrors"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/base"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/middlewares/permissions"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/middlewares/userauth"
@@ -69,28 +70,28 @@ func (h *ThirdPartyController) list(userID string, c *fiber.Ctx) error {
 	if from := c.Query("from"); from != "" {
 		t, err := time.Parse(time.RFC3339, from)
 		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "invalid from: "+err.Error())
+			return apierrors.ErrInvalidDateFrom(err)
 		}
 		filters = append(filters, tests.WithFrom(t))
 	}
 	if to := c.Query("to"); to != "" {
 		t, err := time.Parse(time.RFC3339, to)
 		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "invalid to: "+err.Error())
+			return apierrors.ErrInvalidDateTo(err)
 		}
 		filters = append(filters, tests.WithTo(t))
 	}
 	if limit := c.Query("limit"); limit != "" {
 		n, err := strconv.Atoi(limit)
 		if err != nil || n <= 0 {
-			return fiber.NewError(fiber.StatusBadRequest, "invalid limit")
+			return apierrors.ErrInvalidLimit
 		}
 		filters = append(filters, tests.WithLimit(n))
 	}
 	if offset := c.Query("offset"); offset != "" {
 		n, err := strconv.Atoi(offset)
 		if err != nil || n < 0 {
-			return fiber.NewError(fiber.StatusBadRequest, "invalid offset")
+			return apierrors.ErrInvalidOffset
 		}
 		filters = append(filters, tests.WithOffset(n))
 	}
@@ -118,7 +119,7 @@ func (h *ThirdPartyController) get(userID string, c *fiber.Ctx) error {
 	result, err := h.testsSvc.Get(effectiveUID, id)
 	if err != nil {
 		if errors.Is(err, tests.ErrNotFound) {
-			return fiber.NewError(fiber.StatusNotFound, "test not found")
+			return apierrors.ErrTestNotFound
 		}
 		return fmt.Errorf("failed to get test: %w", err)
 	}
@@ -216,22 +217,22 @@ func (h *ThirdPartyController) scheduleBatch(userID string, c *fiber.Ctx) error 
 func (h *ThirdPartyController) history(userID string, c *fiber.Ctx) error {
 	postID := c.Query("postId")
 	if postID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "postId is required")
+		return apierrors.ErrPostIDRequired
 	}
 	effectiveUID := permissions.EffectiveUserID(c, userID)
 
 	gran := tests.HistoryGranularity(c.Query("bucket", "day"))
 	if gran != tests.HistoryGranularityDay && gran != tests.HistoryGranularityHour {
-		return fiber.NewError(fiber.StatusBadRequest, "bucket must be 'day' or 'hour'")
+		return apierrors.ErrInvalidBucket
 	}
 
 	from, err := parseTimeOrDefault(c.Query("from"), time.Now().Add(-30*24*time.Hour))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid from: "+err.Error())
+		return apierrors.ErrInvalidDateFrom(err)
 	}
 	to, err := parseTimeOrDefault(c.Query("to"), time.Now())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid to: "+err.Error())
+		return apierrors.ErrInvalidDateTo(err)
 	}
 
 	// cloud-gesvial.19.2 C1: pass the request context so the SQL aggregation
@@ -287,7 +288,7 @@ func (h *ThirdPartyController) cancel(userID string, c *fiber.Ctx) error {
 	result, err := h.testsSvc.Cancel(effectiveUID, id)
 	if err != nil {
 		if errors.Is(err, tests.ErrNotFound) {
-			return fiber.NewError(fiber.StatusNotFound, "test not found")
+			return apierrors.ErrTestNotFound
 		}
 		if errors.Is(err, tests.ErrCannotCancel) {
 			return fiber.NewError(fiber.StatusConflict, err.Error())

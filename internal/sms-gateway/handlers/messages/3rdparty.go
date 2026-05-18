@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/android-sms-gateway/client-go/smsgateway"
+	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/apierrors"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/base"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/converters"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/middlewares/permissions"
@@ -111,7 +112,7 @@ func (h *ThirdPartyController) post(userID string, c *fiber.Ctx) error {
 			Port: data.Port,
 		}
 	} else {
-		return fiber.NewError(fiber.StatusBadRequest, "No message content provided")
+		return apierrors.ErrMessageContentMissing
 	}
 
 	msg := messages.MessageIn{
@@ -265,7 +266,7 @@ func (h *ThirdPartyController) postInboxExport(userID string, c *fiber.Ctx) erro
 	device, err := h.devicesSvc.Get(userID, devices.WithID(req.DeviceID))
 	if err != nil {
 		if errors.Is(err, devices.ErrNotFound) {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid device ID")
+			return apierrors.ErrDeviceNotFound
 		}
 
 		h.Logger.Error("failed to get device", zap.Error(err), zap.String("user_id", userID))

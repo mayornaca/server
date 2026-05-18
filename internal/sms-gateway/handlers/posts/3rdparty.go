@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/apierrors"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/base"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/middlewares/permissions"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/handlers/middlewares/userauth"
@@ -76,7 +77,7 @@ func (h *ThirdPartyController) get(userID string, c *fiber.Ctx) error {
 	post, err := h.postsSvc.Get(effectiveUID, id)
 	if err != nil {
 		if errors.Is(err, posts.ErrNotFound) {
-			return fiber.NewError(fiber.StatusNotFound, "post not found")
+			return apierrors.ErrPostNotFound
 		}
 		return fmt.Errorf("failed to get post: %w", err)
 	}
@@ -122,7 +123,7 @@ func (h *ThirdPartyController) put(userID string, c *fiber.Ctx) error {
 
 	if err := h.postsSvc.Update(effectiveUID, id, dto); err != nil {
 		if errors.Is(err, posts.ErrNotFound) {
-			return fiber.NewError(fiber.StatusNotFound, "post not found")
+			return apierrors.ErrPostNotFound
 		}
 		return fmt.Errorf("failed to update post: %w", err)
 	}
@@ -165,7 +166,7 @@ func (h *ThirdPartyController) patch(userID string, c *fiber.Ctx) error {
 	updated, err := h.postsSvc.Patch(effectiveUID, id, fields)
 	if err != nil {
 		if errors.Is(err, posts.ErrNotFound) {
-			return fiber.NewError(fiber.StatusNotFound, "post not found")
+			return apierrors.ErrPostNotFound
 		}
 		return fmt.Errorf("failed to patch post: %w", err)
 	}
