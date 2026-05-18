@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams, Link } from "react-router-dom"
+import i18n from "@/i18n"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/StatusBadge"
@@ -56,7 +57,7 @@ export default function PostDetail() {
       setTestsList(t.data)
       setGateways(d.data)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error cargando poste")
+      setError(e instanceof Error ? e.message : i18n.t("errors.loading.post"))
     }
   }, [id])
 

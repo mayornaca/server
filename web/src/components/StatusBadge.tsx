@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge"
+import { Radio } from "lucide-react"
 
 // cloud-gesvial.22.1.0: estados positivos pasan a `success` (verde) en lugar
 // de `default` (negro/primario). El default visual chocaba con la convención
@@ -85,16 +86,16 @@ export function StatusBadge({
           {subLabel}
         </Badge>
       )}
-      {/* cloud-gesvial.21.0.1: 📡 SOLO cuando hay confirmación efectiva
-          de entrega. Pre-fix mostrar 📡 con opacity-50 para
-          delivery_confirmed=false era visualmente indistinguible del
-          icono sólido — el operador veía "Fallido + Sin evidencia + 📡"
-          y razonaba "si tiene 📡 algo llegó", lo cual es falso. Ahora:
-          delivery_confirmed=true → 📡 visible
-          delivery_confirmed=false/null → nada (la ausencia de 📡 +
-          la etiqueta "Sin evidencia" comunican el mensaje correcto). */}
+      {/* cloud-gesvial.21.0.1 + Fase 6 plan QA: indicador de entrega solo
+          cuando hay confirmación efectiva. Pre-fix usaba emoji unicode
+          (radio dish) con opacity-50 para delivery_confirmed=false — era
+          visualmente ambiguo. Fase 6 reemplaza por icono lucide-react
+          (Radio) mostrado SOLO en delivery_confirmed=true. La ausencia
+          del icono + etiqueta "Sin evidencia" comunica el caso negativo. */}
       {deliveryConfirmed === true && (
-        <span title="Carrier confirmó entrega al teléfono" className="text-xs">📡</span>
+        <span title="Carrier confirmó entrega al teléfono" className="text-muted-foreground">
+          <Radio className="w-3 h-3" aria-hidden />
+        </span>
       )}
     </span>
   )

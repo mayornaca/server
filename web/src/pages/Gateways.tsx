@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Card } from "@/components/ui/card"
+import { Smartphone } from "lucide-react"
+import i18n from "@/i18n"
 import { Badge } from "@/components/ui/badge"
 import { devices as devicesApi } from "@/api/client"
 import type { Device } from "@/api/types"
@@ -43,7 +45,7 @@ export default function Gateways() {
       setDevicesList(data)
       setError(null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error cargando gateways")
+      setError(e instanceof Error ? e.message : i18n.t("errors.loading.gateways"))
     } finally {
       setLoading(false)
     }
@@ -97,8 +99,8 @@ export default function Gateways() {
                   </div>
                   <div className="text-sm font-mono">
                     {d.phoneNumber ? (
-                      <span className="text-foreground">
-                        📱 {formatPhone(d.phoneNumber)}
+                      <span className="text-foreground inline-flex items-center gap-1.5">
+                        <Smartphone className="w-4 h-4" aria-hidden /> {formatPhone(d.phoneNumber)}
                       </span>
                     ) : (
                       <span className="text-muted-foreground italic">

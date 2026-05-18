@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Card } from "@/components/ui/card"
+import i18n from "@/i18n"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -49,7 +50,7 @@ export default function Settings() {
       const { data } = await schedulesApi.list()
       setScheds(data)
     } catch (e) {
-      setSchedsError(e instanceof Error ? e.message : "Error cargando reglas")
+      setSchedsError(e instanceof Error ? e.message : i18n.t("errors.loading.schedules"))
     } finally {
       setSchedsLoading(false)
     }

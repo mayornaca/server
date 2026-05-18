@@ -1,4 +1,6 @@
 import { Link } from "react-router-dom"
+import { CheckCircle2, XCircle, Timer, Radio } from "lucide-react"
+import type { ReactNode } from "react"
 import type { SosPost, TestResult } from "@/api/types"
 import { formatDate } from "@/lib/utils"
 
@@ -27,11 +29,12 @@ const statusLabel: Record<string, string> = {
   UNKNOWN: "Sin info",
 }
 
-const statusIcon: Record<string, string> = {
-  OK:      "✅",
-  FAIL:    "❌",
-  TESTING: "⏱",
-  UNKNOWN: "—",
+// Iconos lucide-react reemplazan los emojis previos (checkmark, X, timer) — Fase 6 plan QA.
+const statusIcon: Record<string, ReactNode> = {
+  OK:      <CheckCircle2 className="w-4 h-4 text-green-700" aria-hidden />,
+  FAIL:    <XCircle      className="w-4 h-4 text-red-700"   aria-hidden />,
+  TESTING: <Timer        className="w-4 h-4 text-yellow-700" aria-hidden />,
+  UNKNOWN: <span aria-hidden>—</span>,
 }
 
 const failureKindLabel: Record<string, string> = {
@@ -56,7 +59,7 @@ export function PostStatusCard({ post, lastTest }: Props) {
 
   const bg = statusBg[post.status] ?? statusBg.UNKNOWN
   const label = statusLabel[post.status] ?? post.status
-  const icon = statusIcon[post.status] ?? "—"
+  const icon: ReactNode = statusIcon[post.status] ?? <span aria-hidden>—</span>
 
   // Subtítulo: razón del fail o carrier de delivery
   let subtitle: React.ReactNode = null
@@ -69,14 +72,14 @@ export function PostStatusCard({ post, lastTest }: Props) {
       )
     } else if (lastTest.status === "PASSED" && lastTest.deliveryCarrier) {
       subtitle = (
-        <div className="text-xs text-green-700 mt-0.5 truncate">
-          📡 {lastTest.deliveryCarrier}
+        <div className="text-xs text-green-700 mt-0.5 truncate flex items-center gap-1">
+          <Radio className="w-3 h-3" aria-hidden /> {lastTest.deliveryCarrier}
         </div>
       )
     } else if (lastTest.status === "PASSED" && lastTest.deliveryConfirmed === true) {
       subtitle = (
-        <div className="text-xs text-green-700 mt-0.5 truncate">
-          📡 Entregado
+        <div className="text-xs text-green-700 mt-0.5 truncate flex items-center gap-1">
+          <Radio className="w-3 h-3" aria-hidden /> Entregado
         </div>
       )
     } else if (lastTest.status === "ERROR") {

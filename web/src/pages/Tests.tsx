@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
+import i18n from "@/i18n"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -104,7 +105,7 @@ export default function Tests() {
     } catch (e) {
       // cloud-gesvial.19.1: pre-fix this throw left the page in "Cargando..."
       // forever with no recovery path on any 5xx / network error.
-      setError(e instanceof Error ? e.message : "Error cargando pruebas")
+      setError(e instanceof Error ? e.message : i18n.t("errors.loading.tests"))
     } finally {
       setLoading(false)
     }

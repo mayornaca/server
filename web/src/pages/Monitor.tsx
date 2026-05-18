@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Card } from "@/components/ui/card"
+import i18n from "@/i18n"
 import { StatusBadge } from "@/components/StatusBadge"
 import { PostStatusCard } from "@/components/PostStatusCard"
 import { PendingCountdown } from "@/components/PendingCountdown"
@@ -49,7 +50,7 @@ export default function Monitor() {
       setGateways(devs.data)
       setLastEventAt(Date.now())
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error cargando monitoreo")
+      setError(e instanceof Error ? e.message : i18n.t("errors.loading.monitor"))
     }
   }, [])
 

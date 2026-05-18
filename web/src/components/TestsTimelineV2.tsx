@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import type { TestResult, SosPost, TestType } from "@/api/types"
 import { tests as testsApi } from "@/api/client"
 import { formatDate } from "@/lib/utils"
+import i18n from "@/i18n"
+import { AlertTriangle } from "lucide-react"
 
 // TestsTimelineV2 — replanteo del timeline de pruebas. cloud-gesvial.21.0.
 //
@@ -89,7 +91,7 @@ export function TestsTimelineV2({ posts, onSelect, typeFilter, statusFilter }: P
       setTests(data)
       setTruncated(typeof totalCount === "number" && totalCount > MAX_TIMELINE_RESULTS)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error cargando línea de tiempo")
+      setError(e instanceof Error ? e.message : i18n.t("errors.loading.timeline"))
     } finally {
       setLoading(false)
     }
@@ -198,7 +200,7 @@ export function TestsTimelineV2({ posts, onSelect, typeFilter, statusFilter }: P
         <span className="text-xs text-muted-foreground ml-2">
           {tests.length} pruebas en el rango
           {truncated && (
-            <span className="text-yellow-700"> · ⚠ acotá el rango (&gt;{MAX_TIMELINE_RESULTS})</span>
+            <span className="text-yellow-700 inline-flex items-center gap-1"> · <AlertTriangle className="w-3 h-3" aria-hidden /> acotá el rango (&gt;{MAX_TIMELINE_RESULTS})</span>
           )}
         </span>
         {selectedPostIds.size > 0 && (
@@ -480,9 +482,9 @@ function buildTooltip(t: TestResult): string {
     parts.push(`→ ${FAILURE_KIND_LABEL[t.failureKind] ?? t.failureKind}`)
   }
   if (t.deliveryConfirmed === true) {
-    parts.push(`📡 ${t.deliveryCarrier ?? "Entregado"}`)
+    parts.push(`Entrega: ${t.deliveryCarrier ?? "confirmada"}`)
   } else if (t.deliveryConfirmed === false) {
-    parts.push("📡 No entregado")
+    parts.push("Entrega: no llegó")
   }
   return parts.join(" · ")
 }

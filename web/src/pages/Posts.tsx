@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
+import i18n from "@/i18n"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -63,7 +64,7 @@ export default function Posts() {
       const { data } = await postsApi.list(params)
       setPostsList(data)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error cargando postes")
+      setError(e instanceof Error ? e.message : i18n.t("errors.loading.posts"))
     } finally {
       setLoading(false)
     }

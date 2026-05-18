@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
+import { Check, Info as InfoIcon, X as XIcon } from "lucide-react"
 
 // Toast unificado para feedback transitorio (success/info/error). Reemplaza el
 // patrón ad-hoc setError/setBatchMsg que dejaba mensajes pegados en la zona
@@ -42,10 +43,12 @@ const KIND_STYLE: Record<ToastKind, string> = {
   info: "bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-950/40 dark:border-blue-700 dark:text-blue-100",
 }
 
-const KIND_PREFIX: Record<ToastKind, string> = {
-  success: "✓",
-  error: "✕",
-  info: "i",
+// Iconos lucide-react reemplazan los símbolos previos (checkmark, x, info) —
+// Fase 6 plan QA 2026-05-17. Mismas semánticas, mismo tamaño visual.
+const KIND_ICON: Record<ToastKind, ReactNode> = {
+  success: <Check className="w-4 h-4" aria-hidden />,
+  error: <XIcon className="w-4 h-4" aria-hidden />,
+  info: <InfoIcon className="w-4 h-4" aria-hidden />,
 }
 
 const AUTODISMISS_MS = 6000
@@ -83,7 +86,7 @@ export function ToastHost() {
           role={t.kind === "error" ? "alert" : "status"}
           className={`pointer-events-auto rounded-md border px-4 py-3 shadow-md text-sm flex items-start gap-3 ${KIND_STYLE[t.kind]}`}
         >
-          <span aria-hidden className="font-semibold mt-0.5">{KIND_PREFIX[t.kind]}</span>
+          <span aria-hidden className="font-semibold mt-0.5">{KIND_ICON[t.kind]}</span>
           <span className="flex-1">{t.message}</span>
           <button
             type="button"

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+import i18n from "@/i18n"
 import { Card } from "@/components/ui/card"
 import { StatusBadge } from "@/components/StatusBadge"
 import { CardSkeleton, TableRowSkeleton } from "@/components/Skeleton"
@@ -28,7 +29,7 @@ export default function Dashboard() {
       setRecentTests(t.data)
       setAllPosts(p.data)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error cargando datos")
+      setError(e instanceof Error ? e.message : i18n.t("errors.loading.dashboard"))
     }
   }, [])
 

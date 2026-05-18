@@ -1,6 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { StatusBadge } from "@/components/StatusBadge"
 import { formatDate } from "@/lib/utils"
+import { Radio, CheckCircle2, XCircle, AlertTriangle, Hourglass } from "lucide-react"
 import type { TestResult, SosPost, FailureKind } from "@/api/types"
 
 interface Props {
@@ -118,8 +119,9 @@ export function TestDetailModal({ test, post, onClose }: Props) {
                   </p>
                   {test.deliveryConfirmed === true ? (
                     <>
-                      <p className="font-medium">
-                        📡 Entregado{test.deliveryCarrier ? ` por ${test.deliveryCarrier}` : ""}
+                      <p className="font-medium flex items-center gap-1.5">
+                        <Radio className="w-4 h-4" aria-hidden />
+                        Entregado{test.deliveryCarrier ? ` por ${test.deliveryCarrier}` : ""}
                       </p>
                       {test.deliveryAt && (
                         <p className="text-xs text-muted-foreground mt-1">
@@ -128,12 +130,14 @@ export function TestDetailModal({ test, post, onClose }: Props) {
                       )}
                     </>
                   ) : test.deliveryConfirmed === false ? (
-                    <p className="text-destructive font-medium">
-                      📡 No llegó al destino
+                    <p className="text-destructive font-medium flex items-center gap-1.5">
+                      <Radio className="w-4 h-4" aria-hidden />
+                      No llegó al destino
                     </p>
                   ) : (
-                    <p className="text-muted-foreground italic">
-                      📡 Sin información de transporte
+                    <p className="text-muted-foreground italic flex items-center gap-1.5">
+                      <Radio className="w-4 h-4" aria-hidden />
+                      Sin información de transporte
                     </p>
                   )}
                 </div>
@@ -144,15 +148,23 @@ export function TestDetailModal({ test, post, onClose }: Props) {
                     Aplicación (poste)
                   </p>
                   {test.status === "PASSED" ? (
-                    <p className="font-medium">✅ El poste respondió</p>
+                    <p className="font-medium flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-green-700" aria-hidden />
+                      El poste respondió
+                    </p>
                   ) : test.status === "FAILED" ? (
-                    <p className="text-destructive font-medium">
-                      ❌ {failureHint?.label ?? "Sin respuesta del poste"}
+                    <p className="text-destructive font-medium flex items-center gap-1.5">
+                      <XCircle className="w-4 h-4" aria-hidden />
+                      {failureHint?.label ?? "Sin respuesta del poste"}
                     </p>
                   ) : test.status === "ERROR" ? (
-                    <p className="text-destructive font-medium">⚠️ Error</p>
+                    <p className="text-destructive font-medium flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4" aria-hidden /> Error
+                    </p>
                   ) : (
-                    <p className="text-muted-foreground italic">⏳ Pendiente</p>
+                    <p className="text-muted-foreground italic flex items-center gap-1.5">
+                      <Hourglass className="w-4 h-4" aria-hidden /> Pendiente
+                    </p>
                   )}
                 </div>
               </div>
