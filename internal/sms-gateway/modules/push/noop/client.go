@@ -27,4 +27,8 @@ func (c *Client) Send(_ context.Context, messages []client.Message) ([]error, er
 // Close is a no-op.
 func (c *Client) Close(_ context.Context) error { return nil }
 
+// HealthCheck is a no-op (siempre Pass). push_backend=disabled no tiene
+// state externo que pueda fallar.
+func (c *Client) HealthCheck(_ context.Context) error { return nil }
+
 var _ client.Client = (*Client)(nil)

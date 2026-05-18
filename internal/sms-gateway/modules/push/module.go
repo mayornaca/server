@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/push/client"
+	"github.com/android-sms-gateway/server/pkg/health"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
@@ -20,6 +21,9 @@ func Module() fx.Option {
 		),
 		fx.Provide(
 			New,
+		),
+		fx.Provide(
+			health.AsHealthProvider(NewHealthProvider),
 		),
 		fx.Invoke(func(lc fx.Lifecycle, c client.Client) {
 			lc.Append(fx.Hook{

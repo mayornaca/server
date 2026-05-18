@@ -15,9 +15,10 @@ import (
 type Client struct {
 	options map[string]string
 
-	client *messaging.Client
-	mux    sync.Mutex
-	logger *zap.Logger
+	client      *messaging.Client
+	initialized bool
+	mux         sync.Mutex
+	logger      *zap.Logger
 }
 
 // New creates an FCM client. cloud-gesvial.19.3: a logger argument is now
@@ -63,6 +64,7 @@ func (c *Client) Open(ctx context.Context) error {
 		return fmt.Errorf("%w: failed to create firebase messaging client: %w", ErrInitializationFailed, err)
 	}
 
+	c.initialized = true
 	return nil
 }
 
@@ -149,6 +151,7 @@ func (c *Client) Close(_ context.Context) error {
 	defer c.mux.Unlock()
 
 	c.client = nil
+	c.initialized = false
 
 	return nil
 }

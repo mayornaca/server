@@ -130,3 +130,9 @@ func (c *Client) baseURL() string {
 
 	return defaultBaseURL
 }
+
+// HealthCheck siempre retorna nil para el upstream client: la sanidad real
+// (URL configurada, network reachable) la maneja Send con sus errores
+// específicos. /health/ready solo reporta initialization, no probe a la URL.
+// Fase 4 plan QA 2026-05-17.
+func (c *Client) HealthCheck(_ context.Context) error { return nil }
