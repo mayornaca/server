@@ -19,12 +19,10 @@ type service struct {
 
 	tokens *Repository
 
-	metrics *Metrics
-
 	idFactory func() string
 }
 
-func New(config Config, options Options, tokens *Repository, metrics *Metrics) (Service, error) {
+func New(config Config, options Options, tokens *Repository) (Service, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
@@ -37,10 +35,6 @@ func New(config Config, options Options, tokens *Repository, metrics *Metrics) (
 		return nil, fmt.Errorf("%w: revoked storage is required", ErrInitFailed)
 	}
 
-	if metrics == nil {
-		return nil, fmt.Errorf("%w: metrics is required", ErrInitFailed)
-	}
-
 	idFactory, err := nanoid.Standard(jtiLength)
 	if err != nil {
 		return nil, fmt.Errorf("can't create id factory: %w", err)
@@ -51,8 +45,6 @@ func New(config Config, options Options, tokens *Repository, metrics *Metrics) (
 		options: options,
 
 		tokens: tokens,
-
-		metrics: metrics,
 
 		idFactory: idFactory,
 	}, nil
@@ -105,172 +97,105 @@ func (s *service) GenerateTokenPair(
 	scopes []string,
 	accessTTL time.Duration,
 ) (*TokenPairInfo, error) {
-	var tokenInfo *TokenPairInfo
-	var err error
-
-	s.metrics.ObserveIssuance(func() {
-		tokenInfo, err = s.generatePair(userID, scopes, accessTTL)
-		if err != nil {
-			return
-		}
-
-		if err = s.tokens.Insert(
-			ctx,
-			*newAccessTokenModel(userID, tokenInfo.Access),
-			*newRefreshTokenModel(userID, tokenInfo.Access.ID, tokenInfo.Refresh),
-		); err != nil {
-			err = fmt.Errorf("failed to insert tokens: %w", err)
-		}
-	})
-
+	tokenInfo, err := s.generatePair(userID, scopes, accessTTL)
 	if err != nil {
-		s.metrics.IncrementTokensIssued(StatusError)
-	} else {
-		s.metrics.IncrementTokensIssued(StatusSuccess)
+		return nil, err
 	}
 
-	return tokenInfo, err
+	if err = s.tokens.Insert(
+		ctx,
+		*newAccessTokenModel(userID, tokenInfo.Access),
+		*newRefreshTokenModel(userID, tokenInfo.Access.ID, tokenInfo.Refresh),
+	); err != nil {
+		return nil, fmt.Errorf("failed to insert tokens: %w", err)
+	}
+
+	return tokenInfo, nil
 }
 
 func (s *service) RefreshTokenPair(ctx context.Context, refreshToken string) (*TokenPairInfo, error) {
-	var tokenPair *TokenPairInfo
-	var err error
-
-	s.metrics.ObserveRefresh(func() {
-		parsedToken, parseErr := jwt.ParseWithClaims(
-			refreshToken,
-			new(RefreshClaims),
-			func(_ *jwt.Token) (any, error) {
-				return []byte(s.config.Secret), nil
-			},
-			jwt.WithExpirationRequired(),
-			jwt.WithIssuedAt(),
-			jwt.WithIssuer(s.config.Issuer),
-			jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Name}),
-		)
-		if parseErr != nil {
-			err = fmt.Errorf("%w: %w", ErrInvalidToken, parseErr)
-			return
-		}
-
-		parsedClaims, ok := parsedToken.Claims.(*RefreshClaims)
-		if !ok || !parsedToken.Valid {
-			err = ErrInvalidToken
-			return
-		}
-
-		if len(parsedClaims.OriginalScopes) == 0 {
-			err = ErrInvalidToken
-			return
-		}
-		tokenPair, err = s.generatePair(
-			parsedClaims.UserID,
-			parsedClaims.OriginalScopes,
-			s.config.AccessTTL,
-		)
-		if err != nil {
-			return
-		}
-
-		if rotateErr := s.tokens.RotateRefreshToken(
-			ctx,
-			parsedClaims.ID,
-			*newRefreshTokenModel(parsedClaims.UserID, tokenPair.Access.ID, tokenPair.Refresh),
-			*newAccessTokenModel(parsedClaims.UserID, tokenPair.Access),
-		); rotateErr != nil {
-			err = rotateErr
-			return
-		}
-	})
-
-	if err != nil {
-		s.metrics.IncrementTokensRefreshed(StatusError)
-	} else {
-		s.metrics.IncrementTokensRefreshed(StatusSuccess)
+	parsedToken, parseErr := jwt.ParseWithClaims(
+		refreshToken,
+		new(RefreshClaims),
+		func(_ *jwt.Token) (any, error) {
+			return []byte(s.config.Secret), nil
+		},
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+		jwt.WithIssuer(s.config.Issuer),
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Name}),
+	)
+	if parseErr != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, parseErr)
 	}
 
-	return tokenPair, err
+	parsedClaims, ok := parsedToken.Claims.(*RefreshClaims)
+	if !ok || !parsedToken.Valid {
+		return nil, ErrInvalidToken
+	}
+
+	if len(parsedClaims.OriginalScopes) == 0 {
+		return nil, ErrInvalidToken
+	}
+	tokenPair, err := s.generatePair(
+		parsedClaims.UserID,
+		parsedClaims.OriginalScopes,
+		s.config.AccessTTL,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if rotateErr := s.tokens.RotateRefreshToken(
+		ctx,
+		parsedClaims.ID,
+		*newRefreshTokenModel(parsedClaims.UserID, tokenPair.Access.ID, tokenPair.Refresh),
+		*newAccessTokenModel(parsedClaims.UserID, tokenPair.Access),
+	); rotateErr != nil {
+		return nil, rotateErr
+	}
+
+	return tokenPair, nil
 }
 
 func (s *service) ParseToken(ctx context.Context, token string) (*Claims, error) {
-	var claims *Claims
-	var err error
-
-	s.metrics.ObserveValidation(func() {
-		parsedToken, parseErr := jwt.ParseWithClaims(
-			token,
-			new(Claims),
-			func(_ *jwt.Token) (any, error) {
-				return []byte(s.config.Secret), nil
-			},
-			jwt.WithExpirationRequired(),
-			jwt.WithIssuedAt(),
-			jwt.WithIssuer(s.config.Issuer),
-			jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Name}),
-		)
-		if parseErr != nil {
-			err = fmt.Errorf("%w: %w", ErrInvalidToken, parseErr)
-			return
-		}
-
-		parsedClaims, ok := parsedToken.Claims.(*Claims)
-		if !ok || !parsedToken.Valid {
-			err = ErrInvalidToken
-			return
-		}
-
-		revoked, parseErr := s.tokens.IsRevoked(ctx, parsedClaims.ID)
-		if parseErr != nil {
-			err = parseErr
-			return
-		}
-		if revoked {
-			err = ErrTokenRevoked
-			return
-		}
-
-		claims = parsedClaims
-	})
-
-	if err != nil {
-		s.metrics.IncrementTokensValidated(StatusError)
-	} else {
-		s.metrics.IncrementTokensValidated(StatusSuccess)
+	parsedToken, parseErr := jwt.ParseWithClaims(
+		token,
+		new(Claims),
+		func(_ *jwt.Token) (any, error) {
+			return []byte(s.config.Secret), nil
+		},
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+		jwt.WithIssuer(s.config.Issuer),
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Name}),
+	)
+	if parseErr != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, parseErr)
 	}
 
-	return claims, err
+	parsedClaims, ok := parsedToken.Claims.(*Claims)
+	if !ok || !parsedToken.Valid {
+		return nil, ErrInvalidToken
+	}
+
+	revoked, parseErr := s.tokens.IsRevoked(ctx, parsedClaims.ID)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if revoked {
+		return nil, ErrTokenRevoked
+	}
+
+	return parsedClaims, nil
 }
 
 func (s *service) RevokeToken(ctx context.Context, userID, jti string) error {
-	var err error
-
-	s.metrics.ObserveRevocation(func() {
-		err = s.tokens.Revoke(ctx, jti, userID)
-	})
-
-	if err != nil {
-		s.metrics.IncrementTokensRevoked(StatusError)
-	} else {
-		s.metrics.IncrementTokensRevoked(StatusSuccess)
-	}
-
-	return err
+	return s.tokens.Revoke(ctx, jti, userID)
 }
 
 func (s *service) RevokeByUser(ctx context.Context, userID string) error {
-	var err error
-	var revoked int64
-
-	s.metrics.ObserveRevocation(func() {
-		revoked, err = s.tokens.RevokeByUser(ctx, userID)
-	})
-
-	if err != nil {
-		s.metrics.IncrementTokensRevoked(StatusError)
-	} else {
-		s.metrics.IncrementTokensRevoked(StatusSuccess, int(revoked))
-	}
-
+	_, err := s.tokens.RevokeByUser(ctx, userID)
 	return err
 }
 

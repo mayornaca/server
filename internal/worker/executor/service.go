@@ -15,17 +15,14 @@ type Service struct {
 	tasks  []PeriodicTask
 	locker locker.Locker
 
-	metrics *metrics
-	logger  *zap.Logger
+	logger *zap.Logger
 }
 
-func NewService(tasks []PeriodicTask, locker locker.Locker, metrics *metrics, logger *zap.Logger) *Service {
+func NewService(tasks []PeriodicTask, locker locker.Locker, logger *zap.Logger) *Service {
 	return &Service{
 		tasks:  tasks,
 		locker: locker,
-
-		metrics: metrics,
-		logger:  logger,
+		logger: logger,
 	}
 }
 
@@ -98,22 +95,18 @@ func (s *Service) execute(ctx context.Context, task PeriodicTask) {
 		}
 	}()
 
-	s.metrics.IncActiveTasks()
 	defer func() {
 		if err := recover(); err != nil {
 			logger.Error("task panicked", zap.Any("error", err))
 		}
-		s.metrics.DecActiveTasks()
 	}()
 
 	logger.Info("running task")
 
 	start := time.Now()
 	if err := task.Run(ctx); err != nil {
-		s.metrics.ObserveTaskResult(task.Name(), metricsTaskResultError, time.Since(start))
 		logger.Error("task failed", zap.Duration("duration", time.Since(start)), zap.Error(err))
 	} else {
-		s.metrics.ObserveTaskResult(task.Name(), metricsTaskResultSuccess, time.Since(start))
 		logger.Info("task succeeded", zap.Duration("duration", time.Since(start)))
 	}
 }

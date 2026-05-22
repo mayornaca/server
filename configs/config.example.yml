@@ -14,9 +14,20 @@ database: # database
 ## Server Config ##
 
 gateway: # gateway config
-  mode: private # gateway mode (public - allow anonymous device registration, private - protected registration) [GATEWAY__MODE]
-  private_token: 123456789 # access token for device registration in private mode [GATEWAY__PRIVATE_TOKEN]
-  upstream_url: https://api.sms-gate.app/upstream/v1 # upstream server URL for private-mode push notifications [GATEWAY__UPSTREAM_URL]
+  # push_backend selects how push events are delivered to gateway devices.
+  # Since gesvial.14. Valid values:
+  #   fcm       - self-hosted Firebase Cloud Messaging (requires fcm.credentials_json or fcm.credentials_json_file)
+  #   upstream  - forward to an external hub (gateway.upstream_url). Only use if you operate that hub yourself.
+  #   disabled  - no push; SSE is the only delivery channel.
+  # [GATEWAY__PUSH_BACKEND]
+  push_backend: fcm
+
+  # mode is deprecated — kept for backward-compat. public→fcm, private→upstream.
+  # Will emit a warning if used. Remove after 2026-10-01. [GATEWAY__MODE]
+  # mode: ""
+
+  private_token: 123456789 # access token for device registration [GATEWAY__PRIVATE_TOKEN]
+  upstream_url: "" # upstream hub URL (only when push_backend=upstream). NEVER set to api.sms-gate.app — that leaks metadata. [GATEWAY__UPSTREAM_URL]
 http: # http server config
   listen: 127.0.0.1:3000 # listen address [HTTP__LISTEN]
   proxies:
@@ -26,8 +37,12 @@ http: # http server config
     path: /api # public API path [HTTP__API__PATH]
   openapi:
     enabled: false # openapi enabled [HTTP__OPENAPI__ENABLED]
-fcm: # firebase cloud messaging config
-  credentials_json: "{}" # firebase credentials json (for public mode only) [FCM__CREDENTIALS_JSON]
+fcm: # firebase cloud messaging config (used when push_backend=fcm)
+  # Prefer credentials_json_file over credentials_json for production.
+  # Mount the service account JSON as a docker secret; the server reads the
+  # file at boot and uses its content. Keeps the full JSON out of env/logs.
+  credentials_json_file: /run/secrets/fcm_sa # [FCM__CREDENTIALS_JSON_FILE]
+  credentials_json: "" # inline fallback if no file path is set [FCM__CREDENTIALS_JSON]
   timeout_seconds: 1 # push notification send timeout [FCM__TIMEOUT_SECONDS]
   debounce_seconds: 5 # push notification debounce (>= 5s) [FCM__DEBOUNCE_SECONDS]
 sse:
@@ -47,6 +62,14 @@ jwt:
 otp: # otp config
   ttl: 300 # otp ttl in seconds [OTP__TTL]
   retries: 3 # otp generation retries (collision handling) [OTP__RETRIES]
+webhooks: # server-side webhook dispatch (gesvial.14+)
+  # When true, the server POSTs to user-registered webhook URLs in parallel with
+  # the Android gateway — homologation mode for validating equivalence before a
+  # future release deprecates the app-side handler. Off by default.
+  # [WEBHOOKS__SERVER_SIDE_ENABLED]
+  server_side_enabled: false
+  timeout_seconds: 10 # per-request timeout [WEBHOOKS__TIMEOUT_SECONDS]
+  max_retries: 3 # retries on non-2xx with exponential backoff (5s/15s/45s) [WEBHOOKS__MAX_RETRIES]
 
 ## Worker Config ##
 

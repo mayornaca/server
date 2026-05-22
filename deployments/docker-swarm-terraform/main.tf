@@ -39,20 +39,6 @@ resource "docker_service" "app" {
         file_gid    = 100
       }
 
-      #region Prometheus support
-      labels {
-        label = "prometheus.io/scrape"
-        value = "true"
-      }
-      labels {
-        label = "prometheus.io/port"
-        value = "3000"
-      }
-      labels {
-        label = "prometheus.io/job"
-        value = "backend"
-      }
-      #endregion
     }
 
     networks_advanced {
@@ -204,26 +190,6 @@ resource "docker_service" "app" {
     label = "traefik.http.services.${var.app-name}.loadbalancer.server.port"
     value = 3000
   }
-
-  #region Prometheus support
-  labels {
-    label = "prometheus.enabled"
-    value = true
-  }
-
-  labels {
-    label = "prometheus.io/scrape"
-    value = true
-  }
-  labels {
-    label = "prometheus.io/port"
-    value = 3000
-  }
-  labels {
-    label = "prometheus.io/job"
-    value = "backend"
-  }
-  #endregion
 
   rollback_config {
     order   = "start-first"

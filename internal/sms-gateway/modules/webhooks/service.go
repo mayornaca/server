@@ -1,7 +1,9 @@
 package webhooks
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/android-sms-gateway/client-go/smsgateway"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/db"
@@ -119,11 +121,12 @@ func (s *Service) Delete(userID string, filters ...SelectFilter) error {
 	return nil
 }
 
-// notifyDevices asynchronously notifies all the user's devices.
+// notifyDevices notifica a los devices del user con SettingsUpdated. Llamada
+// sincrónica con timeout para que errores propaguen al caller — Fase 3 plan QA.
 func (s *Service) notifyDevices(userID string, deviceID *string) {
-	go func(userID string, deviceID *string) {
-		if err := s.eventsSvc.Notify(userID, deviceID, events.NewWebhooksUpdatedEvent()); err != nil {
-			s.logger.Error("failed to notify devices", zap.Error(err))
-		}
-	}(userID, deviceID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.eventsSvc.Notify(ctx, userID, deviceID, events.NewWebhooksUpdatedEvent()); err != nil {
+		s.logger.Error("failed to notify devices of webhook change", zap.Error(err))
+	}
 }

@@ -13,11 +13,15 @@ import (
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/devices"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/events"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/messages"
-	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/metrics"
+	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/paneleventsbus"
+	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/posts"
+	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/schedules"
+	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/tests"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/push"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/settings"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/sse"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/webhooks"
+	"github.com/android-sms-gateway/server/internal/sms-gateway/servertasks"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/online"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/openapi"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/otp"
@@ -58,11 +62,15 @@ func Module() fx.Option {
 		webhooks.Module(),
 		settings.Module(),
 		devices.Module(),
-		metrics.Module(),
+		posts.Module(),
+		schedules.Module(),
+		tests.Module(),
+		paneleventsbus.Module(),
 		sse.Module(),
 		online.Module(),
 		jwt.Module(),
 		otp.Module(),
+		servertasks.Module(),
 	)
 }
 
@@ -82,9 +90,10 @@ type StartParams struct {
 	Logger *zap.Logger
 	Shut   fx.Shutdowner
 
-	Server          *http.Server
-	MessagesService *messages.Service
-	PushService     *push.Service
+	Server           *http.Server
+	MessagesService  *messages.Service
+	PushService      *push.Service
+	ServerTasksRunner *servertasks.Runner
 }
 
 func Start(p StartParams) error {
@@ -96,6 +105,10 @@ func Start(p StartParams) error {
 
 			wg.Go(func() {
 				p.PushService.Run(ctx)
+			})
+
+			wg.Go(func() {
+				p.ServerTasksRunner.Run(ctx)
 			})
 
 			wg.Go(func() {

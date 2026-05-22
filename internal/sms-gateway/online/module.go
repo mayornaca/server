@@ -17,7 +17,6 @@ func Module() fx.Option {
 		fx.Provide(func(factory appCache.Factory) (cache.Cache, error) {
 			return factory.New("online")
 		}, fx.Private),
-		fx.Provide(newMetrics),
 		fx.Provide(New),
 		fx.Invoke(
 			fxutil.RegisterRunnable[Service](),

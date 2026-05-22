@@ -24,8 +24,7 @@ type Service struct {
 	mu          sync.RWMutex
 	connections map[string][]*sseConnection
 
-	logger  *zap.Logger
-	metrics *metrics
+	logger *zap.Logger
 }
 
 type sseConnection struct {
@@ -39,15 +38,14 @@ type eventWrapper struct {
 	data []byte
 }
 
-func NewService(config Config, logger *zap.Logger, metrics *metrics) *Service {
+func NewService(config Config, logger *zap.Logger) *Service {
 	return &Service{
 		config: config,
 
 		mu:          sync.RWMutex{},
 		connections: make(map[string][]*sseConnection),
 
-		logger:  logger,
-		metrics: metrics,
+		logger: logger,
 	}
 }
 
@@ -57,23 +55,19 @@ func (s *Service) Send(deviceID string, event Event) error {
 
 	connections, exists := s.connections[deviceID]
 	if !exists {
-		// Increment connection errors metric for no connection
-		s.metrics.IncrementConnectionErrors(ErrorTypeNoConnection)
 		return fmt.Errorf("%w: device %s", ErrNoConnection, deviceID)
 	}
 
 	data, err := json.Marshal(event.Data)
 	if err != nil {
-		// Increment connection errors metric for marshaling error
-		s.metrics.IncrementConnectionErrors(ErrorTypeMarshalError)
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
 	sent := 0
+	bufferFull := false
 	for _, conn := range connections {
 		select {
 		case conn.channel <- eventWrapper{string(event.Type), data}:
-			// Message sent successfully
 			sent++
 		case <-conn.closeSignal:
 			s.logger.Warn(
@@ -82,24 +76,25 @@ func (s *Service) Send(deviceID string, event Event) error {
 				zap.String("connection_id", conn.id),
 			)
 		default:
+			bufferFull = true
 			s.logger.Warn(
 				"Connection buffer full while sending event",
 				zap.String("device_id", deviceID),
 				zap.String("connection_id", conn.id),
+				zap.Error(ErrBufferFull),
 			)
-			// Increment connection errors metric for buffer full
-			s.metrics.IncrementConnectionErrors(ErrorTypeBufferFull)
 		}
 	}
 
 	if sent == 0 {
-		// Increment connection errors metric for no active connection
-		s.metrics.IncrementConnectionErrors(ErrorTypeNoConnection)
+		// Diferenciar back-pressure de "no hay conexión": ambos suben sent=0
+		// pero requieren respuestas distintas del caller (retry vs dead-letter).
+		// Fase 3 plan QA 2026-05-17.
+		if bufferFull {
+			return fmt.Errorf("%w: device %s", ErrBufferFull, deviceID)
+		}
 		return fmt.Errorf("%w: device %s", ErrNoConnection, deviceID)
 	}
-
-	// Count events sent
-	s.metrics.IncrementEventsSent(string(event.Type))
 
 	return nil
 }
@@ -136,7 +131,6 @@ func (s *Service) handleStream(deviceID string, w *bufio.Writer) {
 
 	var tickerChan <-chan time.Time
 
-	// Conditionally create ticker
 	if s.config.keepAlivePeriod > 0 {
 		ticker := time.NewTicker(s.config.keepAlivePeriod)
 		defer ticker.Stop()
@@ -147,24 +141,16 @@ func (s *Service) handleStream(deviceID string, w *bufio.Writer) {
 	for {
 		select {
 		case event := <-conn.channel:
-			success := true
-			s.metrics.ObserveEventDeliveryLatency(func() {
-				if err := s.writeToStream(
-					w,
-					fmt.Sprintf("event: %s\ndata: %s", event.name, utils.UnsafeString(event.data)),
-				); err != nil {
-					s.logger.Warn("failed to write event data",
-						zap.String("device_id", deviceID),
-						zap.String("connection_id", conn.id),
-						zap.Error(err))
-					success = false
-				}
-			})
-
-			if !success {
+			if err := s.writeToStream(
+				w,
+				fmt.Sprintf("event: %s\ndata: %s", event.name, utils.UnsafeString(event.data)),
+			); err != nil {
+				s.logger.Warn("failed to write event data",
+					zap.String("device_id", deviceID),
+					zap.String("connection_id", conn.id),
+					zap.Error(err))
 				return
 			}
-		// Conditionally handle ticker events
 		case <-tickerChan:
 			if err := s.writeToStream(w, ":keepalive"); err != nil {
 				s.logger.Warn("failed to write keepalive",
@@ -173,8 +159,6 @@ func (s *Service) handleStream(deviceID string, w *bufio.Writer) {
 					zap.Error(err))
 				return
 			}
-			// Count keepalives sent
-			s.metrics.IncrementKeepalivesSent()
 		case <-conn.closeSignal:
 			return
 		}
@@ -183,11 +167,9 @@ func (s *Service) handleStream(deviceID string, w *bufio.Writer) {
 
 func (s *Service) writeToStream(w *bufio.Writer, data string) error {
 	if _, err := fmt.Fprintf(w, "%s\n\n", data); err != nil {
-		s.metrics.IncrementConnectionErrors(ErrorTypeWriteFailure)
 		return fmt.Errorf("failed to write to stream: %w", err)
 	}
 	if err := w.Flush(); err != nil {
-		s.metrics.IncrementConnectionErrors(ErrorTypeWriteFailure)
 		return fmt.Errorf("failed to flush stream: %w", err)
 	}
 
@@ -212,9 +194,6 @@ func (s *Service) registerConnection(deviceID string) *sseConnection {
 
 	s.connections[deviceID] = append(s.connections[deviceID], conn)
 
-	// Increment active connections metric
-	s.metrics.IncrementActiveConnections()
-
 	s.logger.Info("Registering SSE connection", zap.String("device_id", deviceID), zap.String("connection_id", connID))
 
 	return conn
@@ -230,8 +209,6 @@ func (s *Service) removeConnection(deviceID, connID string) {
 				close(conn.closeSignal)
 				s.connections[deviceID] = append(connections[:i], connections[i+1:]...)
 
-				// Decrement active connections metric
-				s.metrics.DecrementActiveConnections()
 				s.logger.Info(
 					"Removing SSE connection",
 					zap.String("device_id", deviceID),

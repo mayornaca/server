@@ -1,0 +1,14 @@
+{
+  "errors": {
+    "loading": {
+      "timeline": "Error cargando línea de tiempo",
+      "dashboard": "Error cargando datos",
+      "gateways": "Error cargando gateways",
+      "monitor": "Error cargando monitoreo",
+      "post": "Error cargando poste",
+      "posts": "Error cargando postes",
+      "schedules": "Error cargando reglas",
+      "tests": "Error cargando pruebas"
+    }
+  }
+}

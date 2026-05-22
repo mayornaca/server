@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/android-sms-gateway/server/pkg/health"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
@@ -15,6 +16,9 @@ func Module() fx.Option {
 			return log.Named("pubsub")
 		}),
 		fx.Provide(New),
+		fx.Provide(
+			health.AsHealthProvider(NewHealthProvider),
+		),
 		fx.Invoke(func(ps PubSub, logger *zap.Logger, lc fx.Lifecycle) {
 			lc.Append(fx.Hook{
 				OnStart: func(_ context.Context) error {

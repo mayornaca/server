@@ -10,13 +10,13 @@ func Module() fx.Option {
 	return fx.Module(
 		"jwt",
 		logger.WithNamedLogger("jwt"),
-		fx.Provide(NewMetrics, NewRepository, fx.Private),
-		fx.Provide(func(config Config, options Options, tokens *Repository, metrics *Metrics) (Service, error) {
+		fx.Provide(NewRepository, fx.Private),
+		fx.Provide(func(config Config, options Options, tokens *Repository) (Service, error) {
 			if config.Secret == "" {
 				return newDisabled(), nil
 			}
 
-			return New(config, options, tokens, metrics)
+			return New(config, options, tokens)
 		}),
 	)
 }

@@ -1,6 +1,9 @@
 package webhooks
 
-import "gorm.io/gorm"
+import (
+	"github.com/android-sms-gateway/client-go/smsgateway"
+	"gorm.io/gorm"
+)
 
 type SelectFilter func(*selectFilter)
 
@@ -16,11 +19,21 @@ func WithUserID(userID string) SelectFilter {
 	}
 }
 
+// WithEvent filters webhooks by their subscribed event type (e.g. "sms:sent").
+// Used by the server-side dispatcher to locate webhooks that should fire for
+// a given in-flight event.
+func WithEvent(event smsgateway.WebhookEvent) SelectFilter {
+	return func(f *selectFilter) {
+		f.event = &event
+	}
+}
+
 type selectFilter struct {
 	userID        string
 	extID         *string
 	deviceID      *string
 	deviceIDExact bool
+	event         *smsgateway.WebhookEvent
 }
 
 func newFilter(filters ...SelectFilter) *selectFilter {
@@ -56,6 +69,9 @@ func (f *selectFilter) apply(query *gorm.DB) *gorm.DB {
 		} else {
 			query = query.Where("device_id = ? OR device_id IS NULL", *f.deviceID)
 		}
+	}
+	if f.event != nil {
+		query = query.Where("event = ?", *f.event)
 	}
 	return query
 }

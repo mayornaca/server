@@ -50,12 +50,17 @@ func NewThirdPartyController(
 //
 // List devices.
 func (h *ThirdPartyController) get(userID string, c *fiber.Ctx) error {
-	devices, err := h.devicesSvc.Select(userID)
+	effectiveUID := permissions.EffectiveUserID(c, userID)
+	devices, err := h.devicesSvc.Select(effectiveUID)
 	if err != nil {
 		return fmt.Errorf("failed to select devices: %w", err)
 	}
 
-	response := slices.Map(devices, converters.DeviceToDTO)
+	// cloud-gesvial.19.3 D7: el panel ahora consume DeviceWithIdentity (incluye
+	// phoneNumber, model, osVersion, hasPushToken). El SDK upstream sigue
+	// recibiendo los campos clásicos sin modificar — el extra es backward
+	// compatible vía omitempty en JSON.
+	response := slices.Map(devices, converters.DeviceToIdentityDTO)
 
 	return c.JSON(response)
 }
@@ -75,11 +80,17 @@ func (h *ThirdPartyController) get(userID string, c *fiber.Ctx) error {
 //	@Failure		500	{object}	smsgateway.ErrorResponse	"Internal server error"
 //	@Router			/3rdparty/v1/devices/{id} [delete]
 //
-// Remove device.
+// Remove device. cloud-gesvial.18.2: respect admin:all by routing through
+// EffectiveUserID — pre-fix the handler passed the caller's literal username
+// ("ADMIN") which did not match any device's user_id, so the delete silently
+// no-op'd (Repository.Remove returns nil on empty match). The sentinel
+// `__ADMIN__` produced by EffectiveUserID disables the user_id filter inside
+// the repository (see devices/repository_filter.go:61).
 func (h *ThirdPartyController) remove(userID string, c *fiber.Ctx) error {
 	id := c.Params("id")
+	effectiveUID := permissions.EffectiveUserID(c, userID)
 
-	err := h.devicesSvc.Remove(userID, devices.WithID(id))
+	err := h.devicesSvc.Remove(effectiveUID, devices.WithID(id))
 	if errors.Is(err, devices.ErrNotFound) {
 		return fiber.NewError(fiber.StatusNotFound, err.Error())
 	}

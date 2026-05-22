@@ -2,6 +2,7 @@ package webhooks
 
 import (
 	"github.com/capcom6/go-infra-fx/db"
+	"github.com/go-core-fx/fxutil"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
@@ -15,6 +16,10 @@ func Module() fx.Option {
 		fx.Provide(NewRepository, fx.Private),
 		fx.Provide(
 			NewService,
+			NewDispatcher,
+		),
+		fx.Invoke(
+			fxutil.RegisterRunnable[*Dispatcher](),
 		),
 	)
 }

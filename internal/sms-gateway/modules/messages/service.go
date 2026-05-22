@@ -12,6 +12,7 @@ import (
 	"github.com/android-sms-gateway/server/internal/sms-gateway/models"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/db"
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/events"
+	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/webhooks"
 	"github.com/capcom6/go-helpers/anys"
 	"github.com/capcom6/go-helpers/slices"
 	"github.com/nyaruka/phonenumbers"
@@ -26,12 +27,12 @@ type EnqueueOptions struct {
 type Service struct {
 	config Config
 
-	metrics       *metrics
 	cache         *cache
 	messages      *Repository
 	hashingWorker *hashingWorker
 
-	eventsSvc *events.Service
+	eventsSvc      *events.Service
+	webhookSvc     *webhooks.Dispatcher
 
 	logger *zap.Logger
 	idgen  func() string
@@ -39,10 +40,10 @@ type Service struct {
 
 func NewService(
 	config Config,
-	metrics *metrics,
 	cache *cache,
 	messages *Repository,
 	eventsSvc *events.Service,
+	webhookSvc *webhooks.Dispatcher,
 	hashingTask *hashingWorker,
 	logger *zap.Logger,
 	idgen db.IDGen,
@@ -50,12 +51,12 @@ func NewService(
 	return &Service{
 		config: config,
 
-		metrics:       metrics,
 		cache:         cache,
 		messages:      messages,
 		hashingWorker: hashingTask,
 
-		eventsSvc: eventsSvc,
+		eventsSvc:  eventsSvc,
+		webhookSvc: webhookSvc,
 
 		logger: logger,
 		idgen:  idgen,
@@ -121,9 +122,52 @@ func (s *Service) UpdateState(device *models.Device, message MessageStateIn) err
 		s.logger.Warn("failed to cache message", zap.String("id", existing.ExtID), zap.Error(cacheErr))
 	}
 	s.hashingWorker.Enqueue(existing.ID)
-	s.metrics.IncTotal(string(existing.State))
+
+	// gesvial.14 homologation: dispatch server-side webhook for recipient state
+	// updates. No-op when WEBHOOKS__SERVER_SIDE_ENABLED=false (default). Fires
+	// one event per recipient in a terminal state; idempotency is the receiver's
+	// responsibility during validation.
+	s.publishRecipientWebhooks(device.UserID, device.ID, existing)
 
 	return nil
+}
+
+func (s *Service) publishRecipientWebhooks(userID, deviceID string, msg Message) {
+	deviceIDPtr := deviceID
+	updatedAt := time.Now()
+	simNumber := toSimNumber(msg.SimNumber)
+	for _, r := range msg.Recipients {
+		var (
+			event   smsgateway.WebhookEvent
+			payload map[string]any
+		)
+		switch r.State {
+		case ProcessingStateSent:
+			event = smsgateway.WebhookEventSmsSent
+			payload = webhooks.SmsSentPayload(msg.ExtID, r.PhoneNumber, simNumber, 1, updatedAt)
+		case ProcessingStateDelivered:
+			event = smsgateway.WebhookEventSmsDelivered
+			payload = webhooks.SmsDeliveredPayload(msg.ExtID, r.PhoneNumber, simNumber, updatedAt)
+		case ProcessingStateFailed:
+			reason := ""
+			if r.Error != nil {
+				reason = *r.Error
+			}
+			event = smsgateway.WebhookEventSmsFailed
+			payload = webhooks.SmsFailedPayload(msg.ExtID, r.PhoneNumber, simNumber, updatedAt, reason)
+		default:
+			continue
+		}
+		s.webhookSvc.Publish(context.Background(), userID, &deviceIDPtr, event, payload)
+	}
+}
+
+func toSimNumber(sim *uint8) *int {
+	if sim == nil {
+		return nil
+	}
+	v := int(*sim)
+	return &v
 }
 
 func (s *Service) SelectStates(
@@ -144,15 +188,12 @@ func (s *Service) SelectStates(
 func (s *Service) GetState(userID string, id string) (*MessageStateOut, error) {
 	dto, err := s.cache.Get(context.Background(), userID, id)
 	if err == nil {
-		s.metrics.IncCache(true)
-
 		// Cache nil entries represent "not found" and prevent repeated lookups
 		if dto == nil {
 			return nil, ErrMessageNotFound
 		}
 		return dto, nil
 	}
-	s.metrics.IncCache(false)
 
 	message, err := s.messages.Get(
 		*new(SelectFilter).WithExtID(id).WithUserID(userID),
@@ -209,18 +250,19 @@ func (s *Service) Enqueue(device models.Device, message MessageIn, opts EnqueueO
 	); cacheErr != nil {
 		s.logger.Warn("failed to cache message", zap.String("id", msg.ExtID), zap.Error(cacheErr))
 	}
-	s.metrics.IncTotal(string(msg.State))
-
-	go func(userID, deviceID string) {
-		if ntfErr := s.eventsSvc.Notify(userID, &deviceID, events.NewMessageEnqueuedEvent()); ntfErr != nil {
-			s.logger.Error(
-				"failed to notify device",
-				zap.Error(ntfErr),
-				zap.String("user_id", userID),
-				zap.String("device_id", deviceID),
-			)
-		}
-	}(device.UserID, device.ID)
+	// Sync con timeout — Fase 3 plan QA reemplaza goroutine anónima sin await.
+	// El mensaje ya está insertado en DB + cache; el Notify es best-effort,
+	// pero ahora los errores se loguean visible y propagan a observabilidad.
+	notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer notifyCancel()
+	if ntfErr := s.eventsSvc.Notify(notifyCtx, device.UserID, &device.ID, events.NewMessageEnqueuedEvent()); ntfErr != nil {
+		s.logger.Error(
+			"failed to notify device",
+			zap.Error(ntfErr),
+			zap.String("user_id", device.UserID),
+			zap.String("device_id", device.ID),
+		)
+	}
 
 	return state, nil
 }
@@ -282,7 +324,9 @@ func (s *Service) prepareMessage(device models.Device, message MessageIn, opts E
 func (s *Service) ExportInbox(device models.Device, since, until time.Time) error {
 	event := events.NewMessagesExportRequestedEvent(since, until)
 
-	if err := s.eventsSvc.Notify(device.UserID, &device.ID, event); err != nil {
+	exportCtx, exportCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer exportCancel()
+	if err := s.eventsSvc.Notify(exportCtx, device.UserID, &device.ID, event); err != nil {
 		return fmt.Errorf("failed to notify device: %w", err)
 	}
 

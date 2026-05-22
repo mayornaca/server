@@ -1,6 +1,9 @@
 package settings
 
 import (
+	"context"
+	"time"
+
 	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/events"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -79,11 +82,12 @@ func (s *Service) ReplaceSettings(userID string, settings map[string]any) (map[s
 	return filterMap(updated.Settings, rulesPublic)
 }
 
-// notifyDevices asynchronously notifies all the user's devices.
+// notifyDevices notifica a los devices del user de un settings update. Sync
+// con timeout — Fase 3 plan QA reemplaza goroutine anónima sin await.
 func (s *Service) notifyDevices(userID string) {
-	go func(userID string) {
-		if err := s.eventsSvc.Notify(userID, nil, events.NewSettingsUpdatedEvent()); err != nil {
-			s.logger.Error("failed to notify devices", zap.Error(err))
-		}
-	}(userID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.eventsSvc.Notify(ctx, userID, nil, events.NewSettingsUpdatedEvent()); err != nil {
+		s.logger.Error("failed to notify devices of settings change", zap.Error(err))
+	}
 }

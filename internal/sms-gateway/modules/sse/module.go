@@ -14,10 +14,6 @@ func Module() fx.Option {
 			return log.Named("sse")
 		}),
 		fx.Provide(
-			newMetrics,
-			fx.Private,
-		),
-		fx.Provide(
 			NewService,
 		),
 		fx.Invoke(func(lc fx.Lifecycle, svc *Service) {

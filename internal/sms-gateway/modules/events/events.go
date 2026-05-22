@@ -27,3 +27,14 @@ func NewMessagesExportRequestedEvent(since, until time.Time) Event {
 func NewSettingsUpdatedEvent() Event {
 	return NewEvent(smsgateway.PushSettingsUpdated, nil)
 }
+
+func NewTestRequestedEvent(testResultID, postID, testType string) Event {
+	return NewEvent(
+		smsgateway.PushEventType("TestRequested"),
+		map[string]string{
+			"testResultId": testResultID,
+			"postId":       postID,
+			"testType":     testType,
+		},
+	)
+}
